@@ -6,6 +6,9 @@ out/
 dist/
 release/
 
+# electron-vite 构建时生成的临时配置（带时间戳，构建中断会残留）
+electron.vite.config.*.mjs
+
 # 工具目录（9.3MB 技能目录，不进仓库也不进安装包）
 .workbuddy-ai/
 .workbuddy/
@@ -20,3 +23,15 @@ npm-debug.log*
 
 # M0 验证脚本的临时产物
 tests/fixtures/_*
+
+# A 类合成 fixture：由 `npm run fixtures` 确定性生成，8 张合计约 54MB，不入库。
+# 拉下仓库后先跑一次 npm run fixtures 即可。
+# B 类两张真实 iPhone HEIC（iphone-portrait / iphone-landscape）无法再生，正常入库。
+tests/fixtures/noise-hi.jpg
+tests/fixtures/flat-solid.png
+tests/fixtures/alpha-cutout.png
+tests/fixtures/tiny-1x1.png
+tests/fixtures/huge-8000.jpg
+tests/fixtures/sample.webp
+tests/fixtures/sample.avif
+tests/fixtures/oriented-6.jpg

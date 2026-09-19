@@ -187,3 +187,47 @@ if (tagAsP3) p = p.withIccProfile('p3');
 - 两张真实 HEIC fixture 已就位：`tests/fixtures/iphone-portrait.heic`（5712x4284 存储 + irot 270）、`tests/fixtures/iphone-landscape.heic`
 - `scripts/lib/heif.mjs` 是 M0 用的 HEIF 盒子解析器，**不属于产品代码**，只被两个验证脚本引用
 - 项目初始化时还没有 git 仓库，Task 0 结束时补上 `git init`
+
+### 本机开发环境的一个坑：`ELECTRON_RUN_AS_NODE=1`
+
+宿主环境（WorkBuddy 的 CLI 运行时）会给 shell 注入两个变量，子进程会继承：
+
+| 变量 | 后果 |
+|---|---|
+| `NODE_OPTIONS` | 指向一个 `--require` 预载 shim，Node 侧会继承 |
+| `ELECTRON_RUN_AS_NODE=1` | **`electron.exe` 会退化成普通 Node**，不启动浏览器进程 |
+
+`ELECTRON_RUN_AS_NODE=1` 的杀伤力最大。此时：
+
+- `process.type === undefined`（正常应为 `'browser'`）
+- `require('electron')` 不再返回 Electron API，而是命中项目自己的 `node_modules/electron`（npm 包，导出的是一个 exe 路径字符串）
+- 主进程第一行 `electron.app.requestSingleInstanceLock()` 就抛 `Cannot read properties of undefined`
+- 现象具有迷惑性：**同一个 electron.exe，脚本放在项目外能跑、放在项目内就挂**（因为项目内有 `node_modules/electron` 可供命中）
+
+这不是产品问题，是宿主环境问题。处置：
+
+```bash
+env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS npx electron-vite dev
+```
+
+`scripts/smoke-context-isolation.mjs` 已在 `childEnv()` 里显式 `delete` 这两个变量，所以 `npm run smoke` 直接可用。在普通终端（没有这两个变量）下 `npm run dev` 无需任何前缀。
+
+**另一个入口习惯**：冒烟脚本用 `electron .`（走 `package.json` 的 `main`），不用 `electron out/main/index.js`。后者会进 default-app 模式，与 `electron-vite dev` 和打包产物不是同一条入口，没必要引入这个差异。
+
+### Task 1 验收实测结果
+
+`npm run smoke`（构建 + CDP 进渲染进程取值）：
+
+```
+[smoke] 渲染进程隔离检查：
+  通过  window.require 不存在 = undefined
+  通过  window.process 不存在 = undefined
+  通过  window.module 不存在 = undefined
+  通过  window.Buffer 不存在 = undefined
+  通过  window.global 不存在 = undefined
+  通过  window.pictureMore 尚未实现 = undefined
+[smoke] 页面状态：title="图压压" url="file:///D:/pictureMore/out/renderer/index.html" #root=true
+```
+
+`npm run dev` 同样确认：主进程/预加载构建成功，dev server 起在 5173，Electron 起 4 个进程（main / renderer / GPU / utility），零报错。
+
