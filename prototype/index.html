@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图压压 pictureMore · 界面原型 v4</title>
+<style>
+/* ============================================================================
+   Token 三层结构：primitive → semantic → component
+   与 design-system 技能的 token-architecture 一致，可 1:1 映射到最终
+   Tailwind v4 的 @theme。改主题只动这一块。
+   ============================================================================ */
+:root{
+  /* ---------- primitive ---------- */
+  --bone-050:#FBFAF8;
+  --bone-200:#EFEDE8;
+  --stone-100:#F4F2EE;
+  --stone-200:#E9E6E0;
+  --line-100:#E8E5DF;
+  --line-200:#D8D4CC;
+  --ink-900:#141414;
+  --ink-700:#3A3835;
+  --ink-500:#6B6963;
+  --amber-700:#8A5B00;
+
+  --radius-window:12px;
+  --radius-control:6px;
+  --radius-inline:4px;
+
+  --fs-1:12px;
+  --fs-2:15px;
+  --fs-3:20px;
+  --fs-4:36px;
+
+  --sans:"Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;
+  --mono:"Cascadia Mono",Consolas,"SF Mono",ui-monospace,monospace;
+  --ease:cubic-bezier(.16,1,.3,1);
+
+  /* ---------- semantic ---------- */
+  --bg-app:var(--bone-200);
+  --bg-surface:#FFFFFF;
+  --bg-subtle:var(--stone-100);
+  --bg-hover:var(--stone-200);
+  --border:var(--line-100);
+  --border-strong:var(--line-200);
+  --fg:var(--ink-900);
+  --fg-2:var(--ink-700);
+  --fg-3:var(--ink-500);
+  --accent:var(--ink-900);
+  --caution:var(--amber-700);
+
+  /* ---------- component ---------- */
+  --cta-bg:var(--accent);
+  --cta-fg:#FFFFFF;
+  --cta-bg-hover:#2E2C29;
+  --cta-bg-disabled:var(--stone-200);
+  --cta-fg-disabled:var(--fg-3);
+  --track:var(--border);
+  --fill:var(--accent);
+  --pct:64.29%;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg-app);color:var(--fg);
+  font:400 var(--fs-2)/1.5 var(--sans);
+  -webkit-font-smoothing:antialiased;
+  display:grid;place-items:center;padding:32px;
+}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+p{margin:0}
+ul{margin:0;padding:0;list-style:none}
+:focus-visible{outline:2px solid var(--ink-900);outline-offset:2px;border-radius:var(--radius-inline)}
+::selection{background:var(--stone-200)}
+
+/* ============================ window ============================ */
+.window{
+  width:min(980px,100%);height:min(768px,calc(100vh - 96px));
+  background:var(--bg-surface);
+  border:1px solid var(--border-strong);border-radius:var(--radius-window);
+  box-shadow:0 1px 2px rgba(20,20,20,.03),0 20px 52px -26px rgba(20,20,20,.24);
+  overflow:hidden;display:flex;flex-direction:column;
+}
+
+/* ============================ header (产品名在左上角) ============================ */
+.top{
+  flex:none;display:flex;align-items:baseline;gap:9px;height:64px;padding:0 32px;
+  border-bottom:1px solid var(--border);
+}
+.wordmark{font-size:var(--fs-3);font-weight:500;letter-spacing:-.02em}
+.sub{font-size:var(--fs-1);color:var(--fg-3);letter-spacing:.05em}
+
+/* ============================ two-pane body ============================ */
+.body{flex:1;min-height:0;display:grid;grid-template-columns:328px 1fr}
+.body.is-empty{grid-template-columns:1fr}
+.body.is-empty .pane{display:none}
+.body.is-empty .list-pane{padding:32px}
+
+/* ---------- 左：控制区 ---------- */
+.pane{
+  display:flex;flex-direction:column;gap:26px;overflow-y:auto;
+  padding:28px 32px;border-right:1px solid var(--border);
+  scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent;
+}
+.pane::-webkit-scrollbar{width:8px}
+.pane::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px;border:2px solid var(--bg-surface)}
+.field{display:flex;flex-direction:column;gap:10px}
+.field-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+.label{font-size:var(--fs-1);color:var(--fg-3)}
+.value{
+  font-size:var(--fs-4);font-weight:400;line-height:1;letter-spacing:-.035em;
+  font-variant-numeric:tabular-nums;color:var(--fg);transition:color .18s ease;
+}
+.value.is-caution{color:var(--caution)}
+
+/* 滑块 */
+.slider-wrap{position:relative}
+.slider{-webkit-appearance:none;appearance:none;display:block;width:100%;height:24px;margin:0;background:transparent;cursor:pointer}
+.slider:focus-visible{outline:none}
+.slider::-webkit-slider-runnable-track{
+  height:2px;border-radius:2px;
+  background:linear-gradient(to right,var(--fill) 0 var(--pct),var(--track) var(--pct) 100%);
+}
+.slider::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:16px;height:16px;margin-top:-7px;
+  border-radius:50%;background:var(--bg-surface);border:1.5px solid var(--fill);
+  transition:transform .16s var(--ease),box-shadow .16s ease;
+}
+.slider:hover::-webkit-slider-thumb{transform:scale(1.1)}
+.slider:active::-webkit-slider-thumb{transform:scale(.94)}
+.slider:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 5px rgba(20,20,20,.13)}
+.slider::-moz-range-track{height:2px;border-radius:2px;background:var(--track)}
+.slider::-moz-range-progress{height:2px;border-radius:2px;background:var(--fill)}
+.slider::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--bg-surface);border:1.5px solid var(--fill)}
+.slider:focus-visible::-moz-range-thumb{box-shadow:0 0 0 5px rgba(20,20,20,.13)}
+.safe{position:absolute;left:calc(71.43% - 3px);top:1px;width:1px;height:9px;background:var(--border-strong);pointer-events:none}
+.scale{display:flex;justify-content:space-between;font-size:var(--fs-1);color:var(--fg-3);margin-top:-8px}
+
+/* 输出格式 */
+.fmts{display:flex;gap:6px;flex-wrap:wrap}
+.fmts button{
+  height:32px;padding:0 11px;border:1px solid var(--border-strong);border-radius:var(--radius-control);
+  font-size:var(--fs-1);color:var(--fg-3);
+  transition:border-color .14s ease,color .14s ease,background-color .14s ease;
+}
+.fmts button:hover{border-color:var(--fg-3);color:var(--fg-2)}
+.fmts button[aria-checked="true"]{border-color:var(--fg);color:var(--fg);background:var(--bone-050)}
+
+/* 存放位置 */
+.picker{
+  display:flex;align-items:center;gap:10px;width:100%;height:40px;padding:0 12px;
+  border:1px solid var(--border-strong);border-radius:var(--radius-control);
+  transition:border-color .14s ease,background-color .14s ease;
+}
+.picker:hover{border-color:var(--fg-3);background:var(--bone-050)}
+.picker .path{
+  flex:1;min-width:0;text-align:left;font-family:var(--mono);font-size:var(--fs-1);
+  color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.picker .change{flex:none;font-size:var(--fs-1);color:var(--fg-3);border-bottom:1px solid var(--border-strong);transition:color .14s ease,border-color .14s ease}
+.picker:hover .change{color:var(--fg);border-bottom-color:var(--fg)}
+.hint{font-size:var(--fs-1);color:var(--fg-3);line-height:1.65}
+
+/* 承诺与预估 */
+.note{font-size:var(--fs-1);line-height:1.75;color:var(--fg-3)}
+.note.is-caution{color:var(--caution)}
+.estimate{font-family:var(--mono);font-size:var(--fs-1);font-variant-numeric:tabular-nums;color:var(--fg-3)}
+.estimate b{font-weight:400;color:var(--fg)}
+
+/* 操作 */
+.actions{margin-top:auto;display:flex;flex-direction:column;gap:12px}
+.cta{
+  display:block;width:100%;height:48px;border-radius:var(--radius-control);
+  background:var(--cta-bg);color:var(--cta-fg);font-weight:500;
+  transition:background-color .16s ease,transform .1s ease;
+}
+.cta:hover{background:var(--cta-bg-hover)}
+.cta:active{transform:scale(.99)}
+.cta[disabled]{background:var(--cta-bg-disabled);color:var(--cta-fg-disabled);cursor:default;transform:none}
+.foot{text-align:center;font-size:var(--fs-1);color:var(--fg-3)}
+
+/* ---------- 右：图片列表 ---------- */
+.list-pane{display:flex;flex-direction:column;min-height:0;padding:28px 32px}
+.drop{
+  flex:none;display:flex;align-items:center;justify-content:center;gap:10px;
+  height:52px;border:1px dashed var(--border-strong);border-radius:var(--radius-control);
+  color:var(--fg-3);font-size:var(--fs-2);
+  transition:border-color .14s ease,background-color .14s ease,color .14s ease;
+}
+.drop.is-over{border-color:var(--fg);border-style:solid;background:var(--bone-050);color:var(--fg-2)}
+.drop .pick{color:var(--fg);border-bottom:1px solid var(--border-strong);padding-bottom:1px;transition:border-color .14s ease}
+.drop .pick:hover{border-bottom-color:var(--fg)}
+.drop-hint{font-size:var(--fs-1);color:var(--fg-3);display:none}
+/* 空态：拖拽区吃掉整个右侧 */
+.body.is-empty .drop{flex:1;flex-direction:column;gap:16px;font-size:var(--fs-3);color:var(--fg-2)}
+.body.is-empty .drop .drop-hint{display:block;font-size:var(--fs-1)}
+
+.meta{
+  flex:none;display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+  margin-top:22px;padding-bottom:9px;border-bottom:1px solid var(--border);
+  font-size:var(--fs-1);color:var(--fg-3);font-variant-numeric:tabular-nums;
+}
+.meta .clear{font-size:var(--fs-1);color:var(--fg-3);border-bottom:1px solid transparent}
+.meta .clear:hover{color:var(--fg);border-bottom-color:var(--border-strong)}
+.files{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+.files::-webkit-scrollbar{width:8px}
+.files::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px;border:2px solid var(--bg-surface)}
+.files::-webkit-scrollbar-track{background:transparent}
+.file{display:flex;align-items:center;gap:12px;height:44px;border-bottom:1px solid var(--border);transition:opacity .22s ease}
+.file:last-child{border-bottom:0}
+.file.busy{opacity:.3}
+.fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg-2)}
+.fsize{font-family:var(--mono);font-size:var(--fs-1);font-variant-numeric:tabular-nums;color:var(--fg-3);white-space:nowrap}
+.fsize .arw{padding:0 5px}
+.fsize .out{color:var(--fg)}
+.fsize .out.pop{animation:pop 320ms ease-out both}
+.rm{flex:none;font-size:var(--fs-1);color:var(--fg-3);opacity:0;padding:2px 4px;border-radius:var(--radius-inline);transition:opacity .14s ease,color .14s ease,background-color .14s ease}
+.file:hover .rm,.file:focus-within .rm{opacity:1}
+.rm:hover{color:var(--fg);background:var(--bg-hover)}
+
+/* ============================ preview switch ============================ */
+.preview{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:18px;font-size:var(--fs-1)}
+.preview button{color:var(--fg-3);padding-bottom:2px;border-bottom:1px solid transparent}
+.preview button[aria-pressed="true"]{color:var(--fg);border-bottom-color:var(--fg)}
+
+@keyframes pop{from{opacity:0}to{opacity:1}}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.window{animation:rise 520ms var(--ease) both}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+<!--
+THESIS: 左边决定怎么压，右边看着正在压什么。产品名在左上角，别的都在它该在的地方。
+OWN-WORLD: 暖调单色。骨白 #EFEDE8 作底，纯白窗口浮在上面，发丝线 #E8E5DF 划分一切。没有卡片，没有色块，没有图标系统，没有插画。正文 #141414 / 次要 #3A3835 / 三级 #6B6963，全部通过 WCAG AA。唯一的有彩色是琥珀 #8A5B00，只在"这样压会看出痕迹"时出现。全站零 emoji、零装饰性状态点、零渐变、零 em-dash。字体只用系统 UI 字与等宽字两族。
+STORY: 拖入图片 → 在左边拖一条滑块、挑一个输出格式、确认存到哪里 → 看着右边的总量掉下来 → 按一下 → 每行的「4.2 MB」长出「→ 1.5 MB」。
+FIRST VIEWPORT: 左上角是「图压压」。窗口分左右两栏，中间一条发丝线。左栏 328px：体积缩小滑块与 36px 的百分数、输出格式、存放位置（可点开选文件夹）、质量承诺、预估总量，底部通栏黑按钮与本地处理声明。右栏：拖拽区 + 文件清单，每行只有文件名和体积。
+FORM: 极简排印 + 原生桌面双栏工具布局。单一工具（压缩），格式转换并入「输出格式」。方向不掷签：本轮是精确窄需求（new-work.md §3 "precisely specified narrow request → shape those directly"）。
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->
+
+<div class="window">
+  <header class="top">
+    <span class="wordmark">图压压</span>
+    <span class="sub">pictureMore</span>
+  </header>
+
+  <div class="body" id="body">
+
+    <aside class="pane" aria-label="压缩设置">
+
+      <div class="field">
+        <div class="field-head">
+          <span class="label">体积缩小</span>
+          <output class="value" id="valueOut" for="pct">65%</output>
+        </div>
+        <div class="slider-wrap">
+          <input class="slider" id="pct" type="range" min="20" max="90" step="5" value="65"
+                 aria-label="体积缩小百分比" aria-valuetext="体积缩小 65%">
+          <span class="safe" aria-hidden="true"></span>
+        </div>
+        <div class="scale" aria-hidden="true">
+          <span>几乎看不出</span>
+          <span>能看出差别</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">输出格式</span>
+        <div class="fmts" role="radiogroup" aria-label="输出格式">
+          <button role="radio" aria-checked="true" data-fmt="原格式">保持原格式</button>
+          <button role="radio" aria-checked="false" data-fmt="JPG">JPG</button>
+          <button role="radio" aria-checked="false" data-fmt="PNG">PNG</button>
+          <button role="radio" aria-checked="false" data-fmt="WebP">WebP</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">存放位置</span>
+        <button class="picker" id="destPicker" aria-label="更改图片存放位置">
+          <span class="path" id="destPath">D:\照片\2026-09\processed</span>
+          <span class="change">更改</span>
+        </button>
+        <p class="hint">原图不会被改动，压缩后的新文件单独放在这里</p>
+      </div>
+
+      <div class="field">
+        <p class="note" id="note">不改尺寸，不裁剪，不重绘。只重新编码，正常观看看不出差别。</p>
+        <p class="estimate" id="estimate">34.2 MB → <b>约 12.0 MB</b></p>
+      </div>
+
+      <div class="actions">
+        <button class="cta" id="runBtn">压缩这 11 张</button>
+        <p class="foot" id="foot">图片只在这台电脑上处理，不会上传</p>
+      </div>
+
+    </aside>
+
+    <main class="list-pane" id="listPane">
+      <div class="drop" id="drop">
+        <span id="dropText">拖入更多图片，或</span>
+        <button class="pick" id="pickBtn">选择文件</button>
+        <span class="drop-hint">HEIC、JPG、PNG、WebP。一张也行，几十张也行</span>
+      </div>
+
+      <div class="meta" id="meta">
+        <span id="metaCount">共 11 张 · 34.2 MB</span>
+        <button class="clear" id="clearBtn">清空列表</button>
+      </div>
+
+      <ul class="files" id="files">
+        <li class="file" data-mb="4.2"><span class="fname">IMG_2043.HEIC</span><span class="fsize"></span><button class="rm" aria-label="移除 IMG_2043.HEIC">移除</button></li>
+        <li class="file" data-mb="3.8"><span class="fname">IMG_2044.HEIC</span><span class="fsize"></span><button class="rm" aria-label="移除 IMG_2044.HEIC">移除</button></li>
+        <li class="file" data-mb="5.1"><span class="fname">IMG_2045.HEIC</span><span class="fsize"></span><button class="rm" aria-label="移除 IMG_2045.HEIC">移除</button></li>
+        <li class="file" data-mb="2.1"><span class="fname">微信图片_20260918.jpg</span><span class="fsize"></span><button class="rm" aria-label="移除 微信图片_20260918.jpg">移除</button></li>
+        <li class="file" data-mb="3.4"><span class="fname">身份证正面.jpg</span><span class="fsize"></span><button class="rm" aria-label="移除 身份证正面.jpg">移除</button></li>
+        <li class="file" data-mb="1.2"><span class="fname">屏幕截图_2026-09-19.png</span><span class="fsize"></span><button class="rm" aria-label="移除 屏幕截图_2026-09-19.png">移除</button></li>
+        <li class="file" data-mb="2.6"><span class="fname">收据_IMG_2046.jpg</span><span class="fsize"></span><button class="rm" aria-label="移除 收据_IMG_2046.jpg">移除</button></li>
+        <li class="file" data-mb="1.8" data-alpha="1"><span class="fname">头像抠图.png</span><span class="fsize"></span><button class="rm" aria-label="移除 头像抠图.png">移除</button></li>
+        <li class="file" data-mb="3.0"><span class="fname">毕业证.jpg</span><span class="fsize"></span><button class="rm" aria-label="移除 毕业证.jpg">移除</button></li>
+        <li class="file" data-mb="2.4"><span class="fname">银行卡正面.jpg</span><span class="fsize"></span><button class="rm" aria-label="移除 银行卡正面.jpg">移除</button></li>
+        <li class="file" data-mb="4.6"><span class="fname">IMG_2047.HEIC</span><span class="fsize"></span><button class="rm" aria-label="移除 IMG_2047.HEIC">移除</button></li>
+      </ul>
+    </main>
+
+  </div>
+</div>
+
+<div class="preview" role="group" aria-label="原型状态预览">
+  <button id="pvFull" aria-pressed="true">有图</button>
+  <button id="pvEmpty" aria-pressed="false">空列表</button>
+</div>
+
+<script>
+'use strict';
+
+const MIN = 20, MAX = 90, SAFE = 70;
+
+const $ = id => document.getElementById(id);
+const body     = $('body');
+const filesEl  = $('files');
+const dropEl   = $('drop');
+const dropText = $('dropText');
+const slider   = $('pct');
+const valueOut = $('valueOut');
+const noteEl   = $('note');
+const estEl    = $('estimate');
+const metaEl   = $('meta');
+const metaCount= $('metaCount');
+const runBtn   = $('runBtn');
+const footEl   = $('foot');
+const destPath = $('destPath');
+const listPane = $('listPane');
+
+let fmtChoice = '原格式';
+let running = false;
+
+const rows    = () => [...filesEl.querySelectorAll('.file')];
+const total   = () => rows().reduce((s, r) => s + parseFloat(r.dataset.mb), 0);
+const fmtSize = mb => mb >= 1 ? mb.toFixed(1) + ' MB' : Math.round(mb * 1024) + ' KB';
+const ratio   = v => (v - MIN) / (MAX - MIN);
+
+/* ---------------- 存放位置 ---------------- */
+/* 原型：点击循环示例路径。真实实现走 IPC → dialog.showOpenDialog({properties:['openDirectory']}) */
+const DESTS = [
+  'D:\\照片\\2026-09\\processed',
+  'C:\\Users\\82728\\Pictures\\压缩结果',
+  'D:\\桌面\\要发出去的图'
+];
+let destIdx = 0;
+$('destPicker').addEventListener('click', () => {
+  destIdx = (destIdx + 1) % DESTS.length;
+  destPath.textContent = DESTS[destIdx];
+  destPath.title = DESTS[destIdx];
+});
+
+/* ---------------- 滑块 + 承诺文案 ---------------- */
+function sync(){
+  const v = +slider.value;
+  const t = total();
+  const out = t * (1 - v / 100);
+  const tooStrong = v > SAFE;
+  const lossless = fmtChoice === 'PNG';
+  const alphaCount = rows().filter(r => r.dataset.alpha === '1').length;
+  const flattensAlpha = fmtChoice === 'JPG' && alphaCount > 0;
+
+  document.documentElement.style.setProperty('--pct', (ratio(v) * 100).toFixed(2) + '%');
+  document.documentElement.style.setProperty('--fill', tooStrong ? '#8A5B00' : '#141414');
+
+  valueOut.textContent = v + '%';
+  valueOut.classList.toggle('is-caution', tooStrong);
+  slider.setAttribute('aria-valuetext', '体积缩小 ' + v + '%');
+
+  if(lossless){
+    noteEl.classList.add('is-caution');
+    noteEl.textContent = 'PNG 是无损格式，体积基本压不下来。要变小请选 JPG 或 WebP。';
+  }else if(flattensAlpha){
+    noteEl.classList.add('is-caution');
+    noteEl.textContent = '选中的图里有 ' + alphaCount + ' 张带透明区域，转成 JPG 后透明部分会变成白色。';
+  }else if(tooStrong){
+    noteEl.classList.add('is-caution');
+    noteEl.textContent = '超过 ' + SAFE + '% 后，放大到 100% 能看出压缩痕迹。图片尺寸仍然不变。';
+  }else{
+    noteEl.classList.remove('is-caution');
+    noteEl.textContent = '不改尺寸，不裁剪，不重绘。只重新编码，正常观看看不出差别。';
+  }
+
+  estEl.innerHTML = fmtSize(t) + ' → <b>约 ' + fmtSize(out) + '</b>';
+}
+
+function paintSizes(){
+  const v = +slider.value;
+  rows().forEach(r => {
+    const mb = parseFloat(r.dataset.mb);
+    const cell = r.querySelector('.fsize');
+    if(r.dataset.done === '1'){
+      cell.innerHTML = fmtSize(mb) + '<span class="arw">→</span><span class="out">' + fmtSize(mb * (1 - v / 100)) + '</span>';
+    }else{
+      cell.textContent = fmtSize(mb);
+    }
+  });
+  const n = rows().length;
+  metaCount.textContent = n ? '共 ' + n + ' 张 · ' + fmtSize(total()) : '';
+  if(!running) runBtn.textContent = '压缩这 ' + n + ' 张';
+}
+
+/* ---------------- 拖拽与选择 ---------------- */
+['dragenter','dragover'].forEach(t => listPane.addEventListener(t, e => {
+  e.preventDefault(); dropEl.classList.add('is-over');
+}));
+['dragleave','drop'].forEach(t => listPane.addEventListener(t, e => {
+  e.preventDefault(); dropEl.classList.remove('is-over');
+}));
+listPane.addEventListener('drop', () => {
+  // 原型：真实实现走 IPC 读取 File.path，这里只做状态演示
+  show('full');
+});
+$('pickBtn').addEventListener('click', () => show('full'));
+
+/* ---------------- 输出格式 ---------------- */
+document.querySelectorAll('.fmts').forEach(g => g.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if(!b) return;
+  g.querySelectorAll('button').forEach(x => x.setAttribute('aria-checked', String(x === b)));
+  fmtChoice = b.dataset.fmt;
+  sync();
+}));
+
+/* ---------------- 移除 / 清空 ---------------- */
+filesEl.addEventListener('click', e => {
+  const b = e.target.closest('.rm');
+  if(!b) return;
+  b.closest('.file').remove();
+  if(!rows().length) show('empty'); else { paintSizes(); sync(); }
+});
+$('clearBtn').addEventListener('click', () => { filesEl.innerHTML = ''; show('empty'); });
+
+/* ---------------- 跑批 ---------------- */
+runBtn.addEventListener('click', () => {
+  if(running) return;
+  running = true;
+  const list = rows();
+  const n = list.length;
+  runBtn.disabled = true;
+  list.forEach(r => { r.dataset.done = '0'; r.classList.add('busy'); });
+  paintSizes();
+
+  let i = 0;
+  const step = () => {
+    if(i >= n){
+      running = false;
+      runBtn.disabled = false;
+      runBtn.textContent = '再压一次';
+      footEl.textContent = '完成。原图没动，新文件在 ' + destPath.textContent;
+      return;
+    }
+    const r = list[i];
+    r.dataset.done = '1';
+    r.classList.remove('busy');
+    paintSizes();
+    const out = r.querySelector('.out');
+    if(out) out.classList.add('pop');
+    i++;
+    runBtn.textContent = '处理中 ' + i + ' / ' + n;
+    setTimeout(step, 165);
+  };
+  setTimeout(step, 240);
+});
+
+/* ---------------- 原型状态切换 ---------------- */
+const pvFull = $('pvFull'), pvEmpty = $('pvEmpty');
+
+function show(state){
+  const isEmpty = state === 'empty';
+  pvFull.setAttribute('aria-pressed', String(!isEmpty));
+  pvEmpty.setAttribute('aria-pressed', String(isEmpty));
+
+  body.classList.toggle('is-empty', isEmpty);
+  filesEl.hidden = isEmpty;
+  metaEl.hidden = isEmpty;
+
+  dropText.textContent = isEmpty ? '把图片拖到这里' : '拖入更多图片，或';
+  footEl.textContent = '图片只在这台电脑上处理，不会上传';
+
+  if(!isEmpty) paintSizes();
+}
+
+pvFull.addEventListener('click', () => show('full'));
+pvEmpty.addEventListener('click', () => show('empty'));
+
+/* ---------------- init ---------------- */
+slider.addEventListener('input', () => { paintSizes(); sync(); });
+destPath.title = destPath.textContent;
+paintSizes();
+sync();
+</script>
+</body>
+</html>
