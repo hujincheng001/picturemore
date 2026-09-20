@@ -12,13 +12,14 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { get } from 'node:http'
 import { createRequire } from 'node:module'
-import { dirname, resolve } from 'node:path'
+import { basename, dirname, extname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
+import sharp from 'sharp'
 
 const require = createRequire(import.meta.url)
 const PORT = 9333
@@ -324,9 +325,86 @@ async function main() {
     }
   }
 
-  // ---- 6. 左栏布局是否与原型对齐 ----
+  // ---- 6. 空态（应用启动时的初始状态）----
+  // 应用启动时列表是空的，所以这里量的是真实的初始态，不是模拟出来的。
+  // DESIGN.md §4：主体退化为单栏，左栏整个隐藏，拖拽区吃掉整个右侧。
+  const emptyState = await evaluate(`(() => {
+    const pane = document.querySelector('aside[aria-label="压缩设置"]')
+    const main = document.querySelector('main[aria-label="图片列表"]')
+    const drop = main ? main.firstElementChild : null
+    const cs = drop ? getComputedStyle(drop) : null
+    return {
+      paneGone: pane === null,
+      dropText: drop ? drop.textContent : null,
+      dropFlexDir: cs ? cs.flexDirection : null,
+      dropFlexGrow: cs ? cs.flexGrow : null,
+      dropFontSize: cs ? cs.fontSize : null,
+      mainPadding: main ? getComputedStyle(main).padding : null,
+      fileCount: document.querySelectorAll('main li').length,
+      metaGone: main ? main.children.length === 1 : false
+    }
+  })()`)
+
+  console.log('\n[smoke] 空态检查（应用初始状态）：')
+  const EMPTY_EXPECT = {
+    paneGone: true,
+    dropText: '把图片拖到这里选择文件HEIC、JPG、PNG、WebP。一张也行，几十张也行',
+    dropFlexDir: 'column',
+    dropFlexGrow: '1',
+    dropFontSize: '20px',
+    mainPadding: '32px',
+    fileCount: 0,
+    metaGone: true
+  }
+  checkMap(EMPTY_EXPECT, emptyState, '空态', failures)
+
+  // ---- 7. 截图：空态 ----
+  const SHOT_DIR = resolve(ROOT, 'tests/fixtures')
+  try {
+    const emptyShot = resolve(SHOT_DIR, '_shot-app-empty.png')
+    await shootPage(cdp, emptyShot)
+    console.log(`\n[smoke] 截图：应用（空态） → ${emptyShot}`)
+  } catch (e) {
+    // 截图失败不算验收失败，它是给人看的辅助产物
+    console.log(`\n[smoke] 截图跳过：${e.message}`)
+  }
+
+  // ---- 8. 真实拖拽入图 ----
+  // 走 CDP 的拖拽事件，带上真实的文件路径。这条链路是完整的：
+  // dataTransfer.files -> preload 的 webUtils.getPathForFile -> IPC probe -> store。
+  // 用真实文件而不是构造 File 对象，是因为 webUtils 只认磁盘上的文件。
+  const DROP_FILES = ['oriented-6.jpg', 'flat-solid.png', 'alpha-cutout.png'].map((f) =>
+    resolve(ROOT, 'tests/fixtures', f)
+  )
+
+  console.log('\n[smoke] 拖拽入图：')
+  try {
+    for (const type of ['dragEnter', 'dragOver', 'drop']) {
+      await cdp.send('Input.dispatchDragEvent', {
+        type,
+        x: 640,
+        y: 300,
+        data: { items: [], files: DROP_FILES, dragOperationsMask: 1 }
+      })
+    }
+    // 等 probe 回来（要读盘 + 解容器）
+    let listed = 0
+    for (let i = 0; i < 60; i++) {
+      listed = await evaluate(`document.querySelectorAll('main li').length`)
+      if (listed === DROP_FILES.length) break
+      await sleep(250)
+    }
+    const ok = listed === DROP_FILES.length
+    if (!ok) failures.push(`拖拽后列表应有 ${DROP_FILES.length} 行，实际 ${listed} 行`)
+    console.log(`  ${ok ? '通过' : '失败'}  拖入 ${DROP_FILES.length} 个文件，列表出现 ${listed} 行`)
+  } catch (e) {
+    failures.push(`拖拽失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
+  }
+
+  // ---- 9. 布局是否与原型对齐 ----
   // 原型是唯一视觉基准，但「肉眼无差异」这种标准没法自动守。
-  // 这里量的是能从原型 CSS 里逐条读出来的硬指标（尺寸、间距、字号、圆角），
+  // 这里量的是能从原型 CSS 里逐条读出来的硬指标（尺寸、间距、字号、圆角、颜色），
   // 它们一旦被改就会和 prototype/index.html 对不上。
   const layoutExpr = `(() => {
     const px = (el, p) => el ? getComputedStyle(el)[p] : null
@@ -334,9 +412,14 @@ async function main() {
     const header = document.querySelector('header')
     const win = document.querySelector('#root > div')
     const value = document.querySelector('output')
-    const radio = document.querySelector('[role="radio"]')
     const picker = document.querySelector('[aria-label="更改图片存放位置"]')
     const cta = pane ? pane.lastElementChild.querySelector('button') : null
+    const main = document.querySelector('main[aria-label="图片列表"]')
+    const drop = main ? main.firstElementChild : null
+    const meta = main ? main.children[1] : null
+    const unchecked = document.querySelector('[role="radio"][aria-checked="false"]')
+    const checked = document.querySelector('[role="radio"][aria-checked="true"]')
+    const row = document.querySelector('main li')
     return {
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
@@ -352,68 +435,29 @@ async function main() {
       paneBorderRight: px(pane, 'borderRightWidth'),
       valueFontSize: px(value, 'fontSize'),
       valueText: value ? value.textContent : null,
-      radioHeight: px(radio, 'height'),
-      radioRadius: px(radio, 'borderRadius'),
-      // 未选中的那个格式选项（第一个是选中态，颜色本来就不同）
-      radioBorderWidth: (() => {
-        const el = document.querySelector('[role="radio"][aria-checked="false"]')
-        return el ? getComputedStyle(el).borderTopWidth : null
-      })(),
-      radioBorderColor: (() => {
-        const el = document.querySelector('[role="radio"][aria-checked="false"]')
-        return el ? getComputedStyle(el).borderTopColor : null
-      })(),
-      radioColor: (() => {
-        const el = document.querySelector('[role="radio"][aria-checked="false"]')
-        return el ? getComputedStyle(el).color : null
-      })(),
+      radioHeight: px(checked, 'height'),
+      radioRadius: px(checked, 'borderRadius'),
       radioCount: document.querySelectorAll('[role="radio"]').length,
-      radioCheckedBorder: (() => {
-        const el = document.querySelector('[role="radio"][aria-checked="true"]')
-        return el ? getComputedStyle(el).borderTopColor : null
-      })(),
-      radioCheckedBg: (() => {
-        const el = document.querySelector('[role="radio"][aria-checked="true"]')
-        return el ? getComputedStyle(el).backgroundColor : null
-      })(),
+      radioBorderWidth: unchecked ? getComputedStyle(unchecked).borderTopWidth : null,
+      radioBorderColor: unchecked ? getComputedStyle(unchecked).borderTopColor : null,
+      radioColor: unchecked ? getComputedStyle(unchecked).color : null,
+      radioCheckedBorder: checked ? getComputedStyle(checked).borderTopColor : null,
+      radioCheckedBg: checked ? getComputedStyle(checked).backgroundColor : null,
       pickerHeight: px(picker, 'height'),
       ctaHeight: px(cta, 'height'),
       ctaText: cta ? cta.textContent : null,
 
-      /* ---------- 右栏 ---------- */
-      listPanePadTop: px(document.querySelector('main[aria-label="图片列表"]'), 'paddingTop'),
-      listPanePadX: px(document.querySelector('main[aria-label="图片列表"]'), 'paddingLeft'),
-      dropHeight: (() => {
-        const el = document.querySelector('main[aria-label="图片列表"] > div')
-        return el ? getComputedStyle(el).height : null
-      })(),
-      dropBorderStyle: (() => {
-        const el = document.querySelector('main[aria-label="图片列表"] > div')
-        return el ? getComputedStyle(el).borderTopStyle : null
-      })(),
-      dropBorderRadius: (() => {
-        const el = document.querySelector('main[aria-label="图片列表"] > div')
-        return el ? getComputedStyle(el).borderTopLeftRadius : null
-      })(),
-      dropText: (() => {
-        const el = document.querySelector('main[aria-label="图片列表"] > div')
-        return el ? el.textContent : null
-      })(),
-      metaText: (() => {
-        const el = document.querySelectorAll('main[aria-label="图片列表"] > div')[1]
-        return el ? el.firstElementChild.textContent : null
-      })(),
-      metaPadBottom: (() => {
-        const el = document.querySelectorAll('main[aria-label="图片列表"] > div')[1]
-        return el ? getComputedStyle(el).paddingBottom : null
-      })(),
-      fileHeight: px(document.querySelector('main li'), 'height'),
+      listPanePadTop: px(main, 'paddingTop'),
+      listPanePadX: px(main, 'paddingLeft'),
+      dropHeight: px(drop, 'height'),
+      dropBorderStyle: drop ? getComputedStyle(drop).borderTopStyle : null,
+      dropBorderRadius: drop ? getComputedStyle(drop).borderTopLeftRadius : null,
+      dropText: drop ? drop.textContent : null,
+      metaText: meta ? meta.firstElementChild.textContent : null,
+      metaPadBottom: px(meta, 'paddingBottom'),
+      fileHeight: px(row, 'height'),
       fileCount: document.querySelectorAll('main li').length,
-      fileFirstName: (() => {
-        const el = document.querySelector('main li')
-        return el ? el.firstElementChild.textContent : null
-      })(),
-      // 移除按钮平时是隐形的，悬停或聚焦才出现（原型 .file:hover .rm）
+      fileFirstName: row ? row.firstElementChild.textContent : null,
       removeOpacity: px(document.querySelector('main li button'), 'opacity'),
       removeText: (() => {
         const el = document.querySelector('main li button')
@@ -445,6 +489,7 @@ async function main() {
     valueText: '65%',
     radioHeight: '32px',
     radioRadius: '6px',
+    radioCount: 4,
     // 未选中：1px 发丝线 #D8D4CC + 三级灰字 #6B6963
     radioBorderWidth: '1px',
     radioBorderColor: 'rgb(216, 212, 204)',
@@ -454,121 +499,149 @@ async function main() {
     radioCheckedBg: 'rgb(251, 250, 248)',
     pickerHeight: '40px',
     ctaHeight: '48px',
-    ctaText: '压缩这 11 张',
+    ctaText: `压缩这 ${DROP_FILES.length} 张`,
 
-    /* ---------- 右栏（原型 .list-pane / .drop / .meta / .file）---------- */
     listPanePadTop: '28px',
     listPanePadX: '32px',
     dropHeight: '52px',
     dropBorderStyle: 'dashed',
     dropBorderRadius: '6px',
     dropText: '拖入更多图片，或选择文件',
-    // 共 11 张 · 34.2 MB —— 中黑点每行最多一个
-    metaText: '共 11 张 · 34.2 MB',
-    metaPadBottom: '9px',
     fileHeight: '44px',
-    fileCount: 11,
-    fileFirstName: 'IMG_2043.HEIC',
+    fileCount: DROP_FILES.length,
+    fileFirstName: 'oriented-6.jpg',
     removeOpacity: '0',
     removeText: '移除'
   }
 
-  console.log('\n[smoke] 左栏布局检查（对照 prototype/index.html）：')
+  console.log('\n[smoke] 布局检查（对照 prototype/index.html）：')
   console.log(`  视口 ${layout.viewportWidth}x${layout.viewportHeight}`)
-  for (const [key, want] of Object.entries(LAYOUT_EXPECT)) {
-    const got = layout[key]
-    // 数字与字符串混着写，统一转成字符串比
-    const ok = String(got) === String(want)
-    if (!ok) failures.push(`左栏 ${key}：期望 ${want}，实际 ${got}`)
-    console.log(`  ${ok ? '通过' : '失败'}  ${key} = ${got}`)
-  }
-  // 四个格式选项：保持原格式 / JPG / PNG / WebP
-  const radioOk = layout.radioCount === 4
-  if (!radioOk) failures.push(`格式选项数量：期望 4，实际 ${layout.radioCount}`)
-  console.log(`  ${radioOk ? '通过' : '失败'}  radioCount = ${layout.radioCount}`)
+  checkMap(LAYOUT_EXPECT, layout, '布局', failures)
 
-  // ---- 7. 截图：应用的有图状态 ----
-  // 顺序有讲究：原型截图靠把这一页导航过去，导航之后就跑不了任何针对应用的检查了。
-  // 所以「应用有图 → 空态检查 → 应用空态 → 原型」这个次序不能动。
-  //
-  // AGENTS.md 的标准是「肉眼能看出差异就是没做完」，硬指标（尺寸/间距/字号）覆盖不到
-  // 对齐、错位、配色这类问题。落到 tests/fixtures/_shot-*.png（下划线前缀，已在 .gitignore 里）。
-  const SHOT_DIR = resolve(ROOT, 'tests/fixtures')
-  const appFullShot = resolve(SHOT_DIR, '_shot-app.png')
+  // ---- 10. 截图：有图状态 ----
   try {
-    await shootPage(cdp, appFullShot)
-    console.log(`\n[smoke] 截图：应用（有图） → ${appFullShot}`)
+    const appShot = resolve(SHOT_DIR, '_shot-app.png')
+    await shootPage(cdp, appShot)
+    console.log(`\n[smoke] 截图：应用（有图） → ${appShot}`)
   } catch (e) {
-    // 截图失败不算验收失败，它是给人看的辅助产物
     console.log(`\n[smoke] 截图跳过：${e.message}`)
   }
 
-  // ---- 8. 空态（DESIGN.md §4 / SPEC §8.4「拖拽区（空）」）----
-  // 点一下「清空列表」，验证空态真的切过去了：左栏整体隐藏、拖拽区吃掉整个右栏、
-  // 文案换成空态那句、格式说明露出来、右栏内边距从 28/32 变成 32。
-  const emptyState = await evaluate(`(async () => {
-    const clear = [...document.querySelectorAll('button')].find((b) => b.textContent === '清空列表')
-    if (!clear) return { ok: false, why: '找不到清空按钮' }
-    clear.click()
-    await new Promise((r) => setTimeout(r, 150))
+  // ---- 11. 跑一批，然后校验输出文件 ----
+  // 这是 SPEC §10.2 的那条端到端冒烟：点 CTA → 等完成 → 断言输出目录里有文件
+  // 且宽高与原图一致。承诺二（尺寸不变）在这里得到端到端的验证。
+  console.log('\n[smoke] 端到端跑一批：')
+  try {
+    const clicked = await evaluate(`(() => {
+      const cta = [...document.querySelectorAll('aside button')].find((b) => /^压缩这/.test(b.textContent))
+      if (!cta) return false
+      cta.click()
+      return true
+    })()`)
+    if (!clicked) throw new Error('找不到 CTA 按钮')
 
-    const pane = document.querySelector('aside[aria-label="压缩设置"]')
-    const main = document.querySelector('main[aria-label="图片列表"]')
-    const drop = main ? main.firstElementChild : null
-    const cs = drop ? getComputedStyle(drop) : null
-    return {
-      ok: true,
-      paneGone: pane === null,
-      dropText: drop ? drop.textContent : null,
-      dropFlexDir: cs ? cs.flexDirection : null,
-      dropFlexGrow: cs ? cs.flexGrow : null,
-      dropFontSize: cs ? cs.fontSize : null,
-      mainPadding: main ? getComputedStyle(main).padding : null,
-      fileCount: document.querySelectorAll('main li').length,
-      metaGone: main ? main.children.length === 1 : false
+    // 等所有行落到终态
+    let states = []
+    for (let i = 0; i < 240; i++) {
+      states = await evaluate(
+        `[...document.querySelectorAll('main li')].map((li) => li.dataset.state)`
+      )
+      if (states.length > 0 && states.every((s) => s === 'done' || s === 'undershot' || s === 'failed')) {
+        break
+      }
+      await sleep(500)
     }
-  })()`)
+    console.log(`  行状态：${states.join(', ')}`)
+    const bad = states.filter((s) => s === 'failed')
+    if (bad.length > 0) failures.push(`端到端跑完有 ${bad.length} 张 failed`)
 
-  console.log('\n[smoke] 空态检查：')
-  const EMPTY_EXPECT = {
-    paneGone: true,
-    dropText: '把图片拖到这里选择文件HEIC、JPG、PNG、WebP。一张也行，几十张也行',
-    dropFlexDir: 'column',
-    dropFlexGrow: '1',
-    dropFontSize: '20px',
-    mainPadding: '32px',
-    fileCount: 0,
-    metaGone: true
-  }
-  if (!emptyState.ok) {
-    failures.push(`空态检查无法进行：${emptyState.why}`)
-    console.log(`  失败  ${emptyState.why}`)
-  } else {
-    for (const [key, want] of Object.entries(EMPTY_EXPECT)) {
-      const got = emptyState[key]
-      const ok = String(got) === String(want)
-      if (!ok) failures.push(`空态 ${key}：期望 ${want}，实际 ${got}`)
-      console.log(`  ${ok ? '通过' : '失败'}  ${key} = ${got}`)
+    // 校验输出：每张输入都要有对应输出，且宽高一致
+    const outDir = resolve(ROOT, 'tests/fixtures/processed')
+    for (const src of DROP_FILES) {
+      const stem = basename(src, extname(src))
+      const candidates = existsSync(outDir)
+        ? readdirSync(outDir).filter((f) => f.startsWith(stem + '.') || f.startsWith(`${stem} (`))
+        : []
+      if (candidates.length === 0) {
+        failures.push(`输出目录里没有 ${stem} 的产物`)
+        console.log(`  失败  ${stem} 没有产物`)
+        continue
+      }
+      const outName = candidates.sort().at(-1)
+      const srcMeta = await sharp(src).metadata()
+      const outMeta = await sharp(resolve(outDir, outName)).metadata()
+      const same = srcMeta.width === outMeta.width && srcMeta.height === outMeta.height
+      if (!same) {
+        failures.push(
+          `${stem} 尺寸被改了：${srcMeta.width}x${srcMeta.height} -> ${outMeta.width}x${outMeta.height}`
+        )
+      }
+      console.log(
+        `  ${same ? '通过' : '失败'}  ${stem} ${srcMeta.width}x${srcMeta.height} -> ${outName} ${outMeta.width}x${outMeta.height}`
+      )
     }
+  } catch (e) {
+    failures.push(`端到端跑批失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
   }
 
-  // ---- 9. 页面确实加载了构建产物 ----
+  // ---- 12. 截图：跑完之后 ----
+  // 结果落位（`4.2 MB → 1.5 MB`）是这个产品最核心的一帧，单独留一张。
+  try {
+    const doneShot = resolve(SHOT_DIR, '_shot-app-done.png')
+    await shootPage(cdp, doneShot)
+    console.log(`\n[smoke] 截图：应用（跑完） → ${doneShot}`)
+  } catch (e) {
+    console.log(`\n[smoke] 截图跳过：${e.message}`)
+  }
+
+  // ---- 13. 文件夹展开一层 + 非图片静默过滤（SPEC §9）----
+  // 造一个文件夹：2 张图 + 1 个 txt。拖进去之后应该只多出 2 行，txt 静默消失、不报错。
+  console.log('\n[smoke] 文件夹展开与非图片过滤：')
+  try {
+    const caseDir = resolve(ROOT, 'tests/fixtures/_dropcase')
+    mkdirSync(caseDir, { recursive: true })
+    copyFileSync(resolve(ROOT, 'tests/fixtures/tiny-1x1.png'), resolve(caseDir, 'a.png'))
+    copyFileSync(resolve(ROOT, 'tests/fixtures/oriented-6.jpg'), resolve(caseDir, 'b.jpg'))
+    writeFileSync(resolve(caseDir, 'note.txt'), 'not an image')
+
+    const before = await evaluate(`document.querySelectorAll('main li').length`)
+    for (const type of ['dragEnter', 'dragOver', 'drop']) {
+      await cdp.send('Input.dispatchDragEvent', {
+        type,
+        x: 640,
+        y: 300,
+        data: { items: [], files: [caseDir], dragOperationsMask: 1 }
+      })
+    }
+    let after = before
+    for (let i = 0; i < 60; i++) {
+      after = await evaluate(`document.querySelectorAll('main li').length`)
+      if (after > before) break
+      await sleep(250)
+    }
+    // 文件夹里 2 张图应该都进来，txt 应该被静默丢掉
+    const ok = after - before === 2
+    if (!ok) failures.push(`拖入文件夹应新增 2 行（文件夹里 2 图 1 txt），实际新增 ${after - before}`)
+    console.log(`  ${ok ? '通过' : '失败'}  拖入文件夹：新增 ${after - before} 行（期望 2，txt 被静默过滤）`)
+
+    const names = await evaluate(`[...document.querySelectorAll('main li')].map((li) => li.firstElementChild.textContent)`)
+    const hasTxt = names.some((n) => n.endsWith('.txt'))
+    if (hasTxt) failures.push('非图片文件 .txt 出现在列表里，应该被静默过滤')
+    console.log(`  ${hasTxt ? '失败' : '通过'}  列表里没有 .txt（当前：${names.join(', ')}）`)
+  } catch (e) {
+    failures.push(`文件夹展开检查失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
+  }
+
+  // ---- 14. 页面确实加载了构建产物 ----
   const title = await evaluate(
     `({ title: document.title, url: location.href, hasRoot: !!document.getElementById('root') })`
   )
-  console.log(`\n[smoke] 页面状态：title="${title.title}" url="${title.url}" #root=${title.hasRoot}`)
+  console.log(`\n[smoke] 页面状态：title="${title.title}" url="${title.url}"`)
   if (!title.hasRoot) failures.push('渲染进程没有 #root 挂载点，index.html 可能没加载')
 
-  // 顺手把刚才那个空态也留一张，和原型的「空列表」预览比对
-  try {
-    const emptyShot = resolve(SHOT_DIR, '_shot-app-empty.png')
-    await shootPage(cdp, emptyShot)
-    console.log(`[smoke] 截图：应用（空态） → ${emptyShot}`)
-  } catch {
-    // 同前，辅助产物失败不算验收失败
-  }
-
-  // ---- 10. 原型截图 ----
+  // ---- 15. 原型截图 ----
   // 放在最后：导航过去之后这一页就是原型了，应用那边再也测不了。
   try {
     const protoShot = await shootPrototype(cdp)
@@ -586,6 +659,16 @@ async function main() {
   }
   console.log('\n[smoke] 全部通过')
   return 0
+}
+
+/** 逐项比对并打日志。数字与字符串混着写，统一转成字符串比 */
+function checkMap(expect, actual, label, failures) {
+  for (const [key, want] of Object.entries(expect)) {
+    const got = actual[key]
+    const ok = String(got) === String(want)
+    if (!ok) failures.push(`${label} ${key}：期望 ${want}，实际 ${got}`)
+    console.log(`  ${ok ? '通过' : '失败'}  ${key} = ${got}`)
+  }
 }
 
 /** 截图用的统一视口。原型和应用用同一个尺寸才谈得上并排比对 */

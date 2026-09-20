@@ -41,5 +41,6 @@ export function reasonFromError(e: unknown): ReasonCode {
   // 图像引擎自己抛的错带 code
   if (code === 'HEIC_DECODE_FAILED') return 'HEIC_DECODE_FAILED'
   if (code === 'DIMENSION_CHANGED') return 'CORRUPT'
+  if (code === 'TIMEOUT') return 'TIMEOUT'
   return 'UNKNOWN'
 }

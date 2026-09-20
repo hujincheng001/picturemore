@@ -1,49 +1,56 @@
-import { useState, type JSX } from 'react'
-import type { OutputFormat } from '../shared/types'
+import { useEffect, type JSX } from 'react'
 import { AppHeader } from './components/AppHeader'
 import { ControlPane } from './components/ControlPane'
 import { FileList } from './components/FileList'
-import type { ImageItem } from './lib/types'
+import { TokenProbe } from './components/TokenProbe'
+import { useAppStore } from './store/useAppStore'
 
 /**
- * Task 11 / 12 的验证外壳。
+ * 窗口外壳 + 全链路接线。
  *
- * 这里搭的是「窗口 + 标题行 + 左栏 + 右栏」，数据是一组写死的样例，
- * 为的是让两个栏位都能在真实渲染环境里被逐项比对（原型 `.window` / `.top` / `.pane` / `.list-pane`）。
- *
- * 样例刻意照抄原型里那 11 个文件，连总体积（34.2 MB）都对上，这样截图能直接叠着看。
- *
- * store 接线、IPC 串通、真实拖拽都是 Task 13 的事，届时这个文件会被整体替换。
+ * 三件事在这里汇合：
+ * 1. 初始化时读一次设置（缩小比例、输出格式、存放位置）
+ * 2. 订阅 task:progress / task:done 两条主进程推送
+ * 3. 空列表时退化成单栏（原型 `.body.is-empty`）
  */
-const MB = 1024 * 1024
-
-/** 原型里那 11 个文件，连体积都照抄，总体积正好 34.2 MB */
-const SAMPLE: ImageItem[] = [
-  ['1', 'IMG_2043.HEIC', 4.2, 'heic', false],
-  ['2', 'IMG_2044.HEIC', 3.8, 'heic', false],
-  ['3', 'IMG_2045.HEIC', 5.1, 'heic', false],
-  ['4', '微信图片_20260918.jpg', 2.1, 'jpeg', false],
-  ['5', '身份证正面.jpg', 3.4, 'jpeg', false],
-  ['6', '屏幕截图_2026-09-19.png', 1.2, 'png', false],
-  ['7', '收据_IMG_2046.jpg', 2.6, 'jpeg', false],
-  ['8', '头像抠图.png', 1.8, 'png', true],
-  ['9', '毕业证.jpg', 3.0, 'jpeg', false],
-  ['10', '银行卡正面.jpg', 2.4, 'jpeg', false],
-  ['11', 'IMG_2047.HEIC', 4.6, 'heic', false]
-].map(([id, name, mb, format, hasAlpha]) => ({
-  id: id as string,
-  name: name as string,
-  bytes: Math.round((mb as number) * MB),
-  format: format as ImageItem['format'],
-  hasAlpha: hasAlpha as boolean,
-  readable: true,
-  state: 'pending' as const
-}))
-
 export default function App(): JSX.Element {
-  const [shrinkPercent, setShrinkPercent] = useState(65)
-  const [outputFormat, setOutputFormat] = useState<OutputFormat>('keep')
-  const [items, setItems] = useState<ImageItem[]>(SAMPLE)
+  const items = useAppStore((s) => s.items)
+  const running = useAppStore((s) => s.running)
+  const progress = useAppStore((s) => s.progress)
+  const finished = useAppStore((s) => s.finished)
+  const lastOutputDir = useAppStore((s) => s.lastOutputDir)
+  const shrinkPercent = useAppStore((s) => s.shrinkPercent)
+  const outputFormat = useAppStore((s) => s.outputFormat)
+  const outputDir = useAppStore((s) => s.outputDir)
+
+  const init = useAppStore((s) => s.init)
+  const addPaths = useAppStore((s) => s.addPaths)
+  const pickFiles = useAppStore((s) => s.pickFiles)
+  const pickOutputDir = useAppStore((s) => s.pickOutputDir)
+  const removeItem = useAppStore((s) => s.removeItem)
+  const clear = useAppStore((s) => s.clear)
+  const setShrinkPercent = useAppStore((s) => s.setShrinkPercent)
+  const setOutputFormat = useAppStore((s) => s.setOutputFormat)
+  const run = useAppStore((s) => s.run)
+
+  useEffect(() => {
+    void init()
+  }, [init])
+
+  // 订阅主进程推送。**必须在 cleanup 里退订**：dev 模式下 React 严格模式会把
+  // effect 跑两遍，不退订就会注册两个监听器，进度回调执行两次（SPEC §14.2）。
+  useEffect(() => {
+    const offProgress = window.pictureMore.onProgress((e) => {
+      useAppStore.getState().applyProgress(e)
+    })
+    const offDone = window.pictureMore.onDone((e) => {
+      useAppStore.getState().finishTask(e)
+    })
+    return () => {
+      offProgress()
+      offDone()
+    }
+  }, [])
 
   const totalBytes = items.reduce((sum, it) => sum + (it.readable ? it.bytes : 0), 0)
   const alphaCount = items.filter((it) => it.hasAlpha).length
@@ -53,49 +60,51 @@ export default function App(): JSX.Element {
     <div className="flex h-[min(768px,calc(100vh-96px))] w-[min(980px,100%)] flex-col overflow-hidden rounded-window border border-strong bg-surface shadow-[0_1px_2px_rgba(20,20,20,.03),0_20px_52px_-26px_rgba(20,20,20,.24)]">
       <AppHeader />
 
-      <div className="grid min-h-0 flex-1" style={{ gridTemplateColumns: empty ? '1fr' : '328px 1fr' }}>
+      <div
+        className="grid min-h-0 flex-1"
+        style={{ gridTemplateColumns: empty ? '1fr' : '328px 1fr' }}
+      >
         {!empty && (
           <ControlPane
             shrinkPercent={shrinkPercent}
             onShrinkChange={setShrinkPercent}
             outputFormat={outputFormat}
             onOutputFormatChange={setOutputFormat}
-            outputDir="D:\\照片\\2026-09\\processed"
+            outputDir={outputDir}
             onPickOutputDir={() => {
-              void window.pictureMore.pickOutputDir()
+              void pickOutputDir()
             }}
             alphaCount={alphaCount}
             totalBytes={totalBytes}
             itemCount={items.length}
-            running={false}
-            progress={0}
-            finished={false}
-            onRun={() => undefined}
+            running={running}
+            progress={progress}
+            finished={finished}
+            lastOutputDir={lastOutputDir}
+            onRun={() => {
+              void run()
+            }}
           />
         )}
 
         <FileList
           items={items}
-          running={false}
-          onPaths={() => undefined}
-          onPickFiles={() => undefined}
-          onRemove={(id) => {
-            setItems((prev) => prev.filter((it) => it.id !== id))
+          running={running}
+          onPaths={(paths) => {
+            void addPaths(paths)
           }}
+          onPickFiles={() => {
+            void pickFiles()
+          }}
+          onRemove={removeItem}
           onClear={() => {
-            setItems([])
+            void clear()
           }}
         />
       </div>
 
-      <div id="token-probe" aria-hidden="true" style={{ position: 'absolute', left: '-9999px', top: 0 }}>
-        <div id="probe-bone" className="bg-bone-200 text-fg-3 rounded-control" />
-        <div id="probe-surface" className="bg-surface text-fg rounded-window" />
-        <div id="probe-caution" className="text-caution rounded-inline" />
-        <div id="probe-type" className="text-4 font-mono" />
-        <div id="probe-strong" className="border border-strong" />
-        <div id="probe-hover" className="bg-hover text-fg-2" />
-      </div>
+      {/* 设计 token 的校验锚点，视觉上移出屏幕，见组件文件的说明 */}
+      <TokenProbe />
     </div>
   )
 }

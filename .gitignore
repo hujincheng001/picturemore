@@ -24,6 +24,9 @@ npm-debug.log*
 # M0 验证脚本的临时产物
 tests/fixtures/_*
 
+# 冒烟脚本端到端跑出来的输出目录（npm run smoke 会把压缩结果写到这里）
+tests/fixtures/processed/
+
 # A 类合成 fixture：由 `npm run fixtures` 确定性生成，8 张合计约 54MB，不入库。
 # 拉下仓库后先跑一次 npm run fixtures 即可。
 # B 类两张真实 iPhone HEIC（iphone-portrait / iphone-landscape）无法再生，正常入库。

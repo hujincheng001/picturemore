@@ -16,6 +16,17 @@ export interface ImageFileMeta {
   id: string
   /** 仅文件名，用于展示 */
   name: string
+  /**
+   * 源文件绝对路径。
+   *
+   * SPEC §6.2 的定义里**没有**这个字段，但 `task:start` 的 `StartTaskPayload.items`
+   * 要的就是 `{ id, path, ... }` —— 渲染层拿不到 path 就拼不出那个 payload。
+   * 这里按 §6.2 的既有风格补一个字段（加法，不改动任何已有字段的名字与类型）。
+   *
+   * 另一条路是让渲染层把传进去的 paths 按下标 zip 回来，但那是个隐式耦合：
+   * 哪天 probe 过滤掉一张图，对应关系就静默错位了。显式带上更稳。
+   */
+  path: string
   ext: string
   bytes: number
   format: ImageFormat

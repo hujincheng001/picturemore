@@ -20,6 +20,11 @@ export interface PrimaryButtonProps {
   progress: number
   /** 这一批是否跑完过，决定是否显示「再压一次」 */
   finished: boolean
+  /**
+   * 跑完后的输出目录。有值时底部那行换成完成提示
+   * （原型：`footEl.textContent = '完成。原图没动，新文件在 ' + path`）
+   */
+  lastOutputDir: string | null
   onClick: () => void
 }
 
@@ -28,6 +33,7 @@ export function PrimaryButton({
   running,
   progress,
   finished,
+  lastOutputDir,
   onClick
 }: PrimaryButtonProps): JSX.Element {
   const label = running
@@ -44,7 +50,9 @@ export function PrimaryButton({
       <button type="button" className={s.cta} onClick={onClick} disabled={disabled}>
         {label}
       </button>
-      <p className="text-center text-1 text-fg-3">{COPY.footer}</p>
+      <p className="text-center text-1 text-fg-3">
+        {lastOutputDir === null ? COPY.footer : COPY.doneTip(lastOutputDir)}
+      </p>
     </div>
   )
 }
