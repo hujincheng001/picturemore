@@ -231,3 +231,65 @@ env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS npx electron-vite dev
 
 `npm run dev` 同样确认：主进程/预加载构建成功，dev server 起在 5173，Electron 起 4 个进程（main / renderer / GPU / utility），零报错。
 
+---
+
+## Task 6 决策：`encode.ts` 的两个取舍
+
+### T6-1：`withIccProfile('p3')` 只挂标签不改像素，但**必须用无损格式才能测出来**
+
+M0-3 记录的是「`withIccProfile('p3')` 只挂标签，平均偏差 0.073/255」。但 sharp 的文档原文是：
+
+> Transform using an ICC profile and attach to the output image.
+> —— `node_modules/sharp/dist/output.cjs:337`
+
+字面意思是**会做色彩转换**，与 M0-3 的记录冲突。这一条直接决定 HEIC（Display P3）路径对不对，所以重测了一遍，脚本落在 `scripts/verify-icc-attach.mjs`（`npm run verify:icc`）。
+
+**第一次测量用了 JPEG q100 + 4:4:4，结论是错的。** 数据：
+
+| 编码格式 | `withIccProfile('p3')` 平均偏差 | `attach:false` 平均偏差 |
+|---|---|---|
+| JPEG q100 4:4:4 | 0.525/255，最大 11 | 1.009/255，最大 35 |
+| **PNG 无损** | **0.070/255，最大 2** | 0.724/255，最大 36 |
+
+JPEG 自身的编解码噪声就有 1/255 量级，把两个变体的差异淹掉了，还让"转色"和"没转色"看起来差不多。
+
+**换 PNG（`compressionLevel: 0`，无损）之后结论才清晰**：`withIccProfile('p3')` 平均 0.070/255、最大 2，纯舍入 —— **只挂标签，不转色**。
+
+机制上说得通：libvips 的 icc transform 在输入没有嵌入 profile 时，把操作当成「assigned」而不是「converted」。而 `attach: false` 走的是另一条路径，反而真的改了像素（0.724/255、最大 36）—— 所以 `attach: false` 是错的用法，不要用。
+
+**教训**：验证"有没有动像素"这类问题，必须用无损格式比较。有损编码的噪声会把信号吃掉。
+
+### T6-2：计划草稿里的 `keepIcc: boolean` 不实现
+
+计划 Task 6 的 `EncodeOptions` 有 `keepIcc: boolean`。但 `SPEC.md` §4.3 的表格把「ICC 色彩配置」列为**硬性保留项**：
+
+> 丢掉会让 sRGB 之外的图（如 Display P3）明显偏色
+
+一个可以被传 `false` 的开关，等于给承诺留了个后门 —— 哪天有人顺手传了 `false`，Display P3 的照片就会偏色，而且不会有任何报错。所以 `EncodeOptions` 只保留两个字段：
+
+```ts
+export interface EncodeOptions {
+  tagAsP3: boolean        // HEIC raw 补挂 P3 标签
+  flattenTo: string | null // JPG 输出时的拍平底色
+}
+```
+
+ICC 在 `input.kind === 'buffer'` 分支里无条件 `keepIccProfile()`。这条与计划草稿的偏差是**有意为之**，依据是 SPEC 优先于计划。
+
+### T6-3：`raw` 分支不写任何 EXIF / orientation
+
+HEIC 经 `heic-decode` 解出的 raw 已经应用过方向（M0-2），且 raw 输入本身不携带任何元信息。所以 `raw` 分支只做两件事：拍平（若需要）、补 P3 标签（若需要）。**绝不写 orientation**，否则照片会二次旋转躺倒。`encode.spec.ts` 里有一条断言专门守这个：
+
+```ts
+expect(meta.orientation === undefined || meta.orientation === 1).toBe(true)
+```
+
+### Task 6 验收
+
+`npm run check`：lint:no-resize + typecheck + **58 条测试全过**（新增 `encode.spec.ts` 22 条）。
+
+其中值得一提的两组：
+- 「尺寸不变量」：7 张 fixture × 3 种输出格式 = 21 个组合，逐个断言宽高与输入一致。
+- 「三种输出格式都保住 ICC」：JPEG / PNG / WebP 三条分支逐个比对 ICC 字节，防止哪条分支漏掉 `keepIccProfile()`。
+
+
