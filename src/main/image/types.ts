@@ -1,5 +1,12 @@
-export type ImageFormat = 'heic' | 'jpeg' | 'png' | 'webp' | 'avif' | 'gif' | 'tiff' | 'unknown'
-export type OutputFormat = 'keep' | 'jpeg' | 'png' | 'webp'
+/**
+ * 图像引擎内部类型。
+ *
+ * `ImageFormat` 与 `OutputFormat` 的唯一定义在 `src/shared/types.ts`（跨进程契约），
+ * 这里只做转出，避免两处各写一份然后慢慢漂移。
+ */
+import type { ImageFormat, OutputFormat } from '../../shared/types'
+
+export type { ImageFormat, OutputFormat }
 
 export interface ProbeResult {
   format: ImageFormat

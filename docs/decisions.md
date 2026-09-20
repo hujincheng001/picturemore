@@ -476,6 +476,68 @@ SPEC §14 的 OOM 处置要求在启动时关掉 sharp 内部缓存。放在 `sr
 
 **刻意没有动 `sharp.concurrency()`。** 并发池负责并行度，libvips 自己的线程数怎么配需要实测再定（N 个并发操作 × 每操作 N 个线程有超订风险，但影响多大没测过）。不凭感觉设，留作后续实测项。
 
+---
+
+## Task 9 决策：`webUtils` 的 M1 验证项结案
+
+### T9-1：`webUtils` 在默认沙箱下可用，**不需要**关掉 sandbox
+
+`SPEC.md` §6.1 留了一个 M1 验证项：
+
+> **⚠️ M1 验证项**：`webUtils` 的官方标注是 renderer 进程模块，在 `sandbox: true`（Electron 默认）的 preload 里能否 `require('electron').webUtils` 需要实测。若不可用，把 `webPreferences.sandbox` 显式设为 `false`。
+
+**实测结论：可用，不用关沙箱。**
+
+`window.ts` 里 `sandbox` 一直保持默认（`true`），preload 直接 `import { webUtils } from 'electron'` 就能拿到。冒烟脚本实际调了一次：
+
+```
+[smoke] webUtils 可用性（SPEC §6.1 M1 验证项）：
+  通过  getDroppedPaths 可调用，返回数组（合成 File 拿到 0 个路径，预期 0）
+```
+
+注意这个测试的设计：用 `new File(['x'], 'a.jpg')` 这种**非磁盘来源**的 File 去调，只为确认调用链通。如果 `webUtils` 拿不到，`webUtils.getPathForFile` 会抛 `TypeError`（读 undefined 的属性），冒烟会红。返回 0 个路径是正确结果 —— 合成 File 本来就没有磁盘路径。
+
+**连带的一条实现决定**：`getDroppedPaths` 里**刻意不加 try/catch**。如果吞掉异常，webUtils 不可用时会静默返回空数组，用户拖进一堆图、界面什么都不发生，这是最难查的一类故障。宁可让它响亮地抛出来。
+
+### T9-2：`window.pictureMore` 的形状用冒烟脚本守住
+
+红线三是「渲染进程不碰文件系统」，但光看 `contextIsolation: true` 看不出来白名单有没有漏。冒烟脚本现在会实际检查：
+
+1. 11 个方法齐全（`probe` / `pickImages` / `pickOutputDir` / `revealInFolder` / `start` / `cancel` / `getSettings` / `setSettings` / `getDroppedPaths` / `onProgress` / `onDone`）
+2. 没泄漏 `ipcRenderer` / `require` / `send` / `invoke` / `on` / `once`
+3. `settings:get` 能往返，返回默认值 `{outputDir:null, shrinkPercent:65, outputFormat:'keep', lastDir:null}`
+
+第 3 条顺带证明了 `handle` / `invoke` 链路是通的，而不只是类型对。
+
+### T9-3：三处对 SPEC 的补充说明
+
+**① `ImageFileMeta.id` 用 `crypto.randomUUID()`，不是 nanoid。**
+SPEC §6.2 的注释写的是 nanoid，但 `AGENTS.md` 明确禁止引入 nanoid。字段类型（`string`）没变，只改了注释，避免后来的人照着注释去装依赖。
+
+**② `ImageFormat` / `OutputFormat` 的唯一定义搬到了 `src/shared/types.ts`。**
+`src/main/image/types.ts` 原本也定义了一份。跨进程契约是权威，引擎内部那份改成转出（`export type { ... }`），避免两处慢慢漂移。
+
+**③ 主进程只吐原因码，不吐文案。**
+`src/shared/reasons.ts` 定义 `ReasonCode`（`ENOENT` / `EACCES` / `NOT_A_FILE` / `CORRUPT` / `HEIC_DECODE_FAILED` / `TIMEOUT` / `WRITE_FAILED` / `UNKNOWN`）。SPEC §8.4 要求文案集中管理、禁止散落在组件里，所以主进程不该编中文。
+
+**⚠️ 这里发现一个文案缺口**：SPEC §9 只给了两种情况的确切文案 ——
+
+| 情况 | 文案 |
+|---|---|
+| 文件头损坏 | 「文件已损坏，无法读取」 |
+| HEIC 解码失败 | 「这台机器上的 HEIC 解码器打不开这张图」 |
+
+而「文件不存在 / 无读权限」这一条，§9 只说「行内显示原因」，**没给字符串**。§8.4 的文案表里也没有。按 AGENTS.md「都不覆盖就停下来问」，这条**留给用户确认**，主进程先只吐码。渲染层映射文案在 Task 12 落地。
+
+### T9-4：`task:start` / `task:cancel` 只登记通道，不实现编排
+
+计划把编排放在 Task 13（它要和 §9 的 17 条边界一起落地）。这里登记通道后**抛 `TASK_ORCHESTRATION_NOT_IMPLEMENTED`**，而不是静默返回成功 —— 静默成功会让渲染层以为任务跑完了，是最难查的一类 bug。
+
+### T9-5：`sandbox` 的一个连带影响
+
+`sandbox: true` 下 preload 能拿到 `webUtils`，但**不能**用 `fs` / `path` 等 Node 模块（这是好事，等于又加了一道闸）。所以 Task 13 的编排必须全部留在主进程，preload 只做转发。这与红线三一致。
+
+
 
 
 

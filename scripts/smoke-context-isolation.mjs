@@ -40,18 +40,36 @@ const PROBES = {
   'window.module 不存在': `typeof window.module`,
   'window.Buffer 不存在': `typeof window.Buffer`,
   'window.global 不存在': `typeof window.global`,
-  'window.pictureMore 尚未实现': `typeof window.pictureMore`
+  'window.pictureMore 已挂载': `typeof window.pictureMore`
 }
 
-/** 期望值：全部是 'undefined'（pictureMore 要到 Task 9 才接线） */
+/** 期望值：前五项必须是 undefined，pictureMore 必须是 object */
 const EXPECTED = {
   'window.require 不存在': 'undefined',
   'window.process 不存在': 'undefined',
   'window.module 不存在': 'undefined',
   'window.Buffer 不存在': 'undefined',
   'window.global 不存在': 'undefined',
-  'window.pictureMore 尚未实现': 'undefined'
+  'window.pictureMore 已挂载': 'object'
 }
+
+/** 白名单里的方法必须都存在。渲染层只能通过这些具名方法拿能力 */
+const API_METHODS = [
+  'probe',
+  'pickImages',
+  'pickOutputDir',
+  'revealInFolder',
+  'start',
+  'cancel',
+  'getSettings',
+  'setSettings',
+  'getDroppedPaths',
+  'onProgress',
+  'onDone'
+]
+
+/** 渲染层不该拿到的东西。ipcRenderer 泄漏等于白名单形同虚设 */
+const FORBIDDEN_ON_API = ['ipcRenderer', 'require', 'send', 'invoke', 'on', 'once']
 
 /**
  * 构造子进程环境。
@@ -172,23 +190,25 @@ async function main() {
   const cdp = await connect(target.webSocketDebuggerUrl)
   await cdp.send('Runtime.enable')
 
-  // 等渲染进程真正挂载完（App.tsx 渲染出占位内容）
-  const expression = `
-    (() => {
-      const out = {}
-      ${Object.entries(PROBES).map(([label, expr]) => `out[${JSON.stringify(label)}] = ${expr}`).join('\n      ')}
-      return out
-    })()
-  `
-  const { result } = await cdp.send('Runtime.evaluate', {
-    expression,
-    returnByValue: true,
-    awaitPromise: false
-  })
-  cdp.close()
-
-  const actual = result.value
   const failures = []
+  const evaluate = async (expression) => {
+    const { result } = await cdp.send('Runtime.evaluate', {
+      expression,
+      returnByValue: true,
+      awaitPromise: true
+    })
+    if (result.subtype === 'error') throw new Error(result.description)
+    return result.value
+  }
+
+  // ---- 1. 进程隔离：Node 能力不能泄漏到渲染层 ----
+  const isoExpr = `(() => {
+    const out = {}
+    ${Object.entries(PROBES).map(([label, expr]) => `out[${JSON.stringify(label)}] = ${expr}`).join('\n    ')}
+    return out
+  })()`
+  const actual = await evaluate(isoExpr)
+
   console.log('\n[smoke] 渲染进程隔离检查：')
   for (const label of Object.keys(PROBES)) {
     const got = actual[label]
@@ -198,20 +218,67 @@ async function main() {
     console.log(`  ${ok ? '通过' : '失败'}  ${label} = ${got}`)
   }
 
-  // 页面标题确认渲染进程真的加载了 out/renderer/index.html，而不是 about:blank
-  const title = await (async () => {
-    const cdp2 = await connect(target.webSocketDebuggerUrl)
-    await cdp2.send('Runtime.enable')
-    const r = await cdp2.send('Runtime.evaluate', {
-      expression: `({ title: document.title, url: location.href, hasRoot: !!document.getElementById('root') })`,
-      returnByValue: true
-    })
-    cdp2.close()
-    return r.result.value
-  })()
+  // ---- 2. 白名单形状：该有的都有，不该有的都没有 ----
+  const shape = await evaluate(`(() => {
+    const api = window.pictureMore || {}
+    const present = ${JSON.stringify(API_METHODS)}.filter((k) => typeof api[k] === 'function')
+    const leaked = ${JSON.stringify(FORBIDDEN_ON_API)}.filter((k) => k in api)
+    return { present, leaked, keys: Object.keys(api) }
+  })()`)
 
+  console.log('\n[smoke] 白名单检查：')
+  const missing = API_METHODS.filter((m) => !shape.present.includes(m))
+  if (missing.length > 0) failures.push(`window.pictureMore 缺少方法：${missing.join(', ')}`)
+  console.log(`  ${missing.length === 0 ? '通过' : '失败'}  方法齐全（${shape.present.length}/${API_METHODS.length}）`)
+  if (shape.leaked.length > 0) failures.push(`window.pictureMore 泄漏了：${shape.leaked.join(', ')}`)
+  console.log(`  ${shape.leaked.length === 0 ? '通过' : '失败'}  未泄漏 ipcRenderer / require（暴露的键：${shape.keys.join(', ')}）`)
+
+  // ---- 3. webUtils 在沙箱 preload 里到底能不能用（SPEC §6.1 的 M1 验证项）----
+  // 拿一个非磁盘来源的 File 去调，只为确认调用链通。返回空数组是正常的，
+  // 抛异常才是问题（说明 webUtils 拿不到）。
+  const webUtils = await evaluate(`(() => {
+    try {
+      const r = window.pictureMore.getDroppedPaths([new File(['x'], 'a.jpg')])
+      return { ok: true, isArray: Array.isArray(r), length: r.length }
+    } catch (e) {
+      return { ok: false, message: String(e && e.message || e) }
+    }
+  })()`)
+
+  console.log('\n[smoke] webUtils 可用性（SPEC §6.1 M1 验证项）：')
+  if (webUtils.ok && webUtils.isArray) {
+    console.log(`  通过  getDroppedPaths 可调用，返回数组（合成 File 拿到 ${webUtils.length} 个路径，预期 0）`)
+  } else {
+    failures.push(`webUtils 在沙箱 preload 里不可用：${webUtils.message}`)
+    console.log(`  失败  ${webUtils.message}`)
+  }
+
+  // ---- 4. IPC 往返：设置读得出来，说明 handle/invoke 通了 ----
+  const settings = await evaluate(`(async () => {
+    try {
+      const s = await window.pictureMore.getSettings()
+      return { ok: true, settings: s }
+    } catch (e) {
+      return { ok: false, message: String(e && e.message || e) }
+    }
+  })()`)
+
+  console.log('\n[smoke] IPC 往返（settings:get）：')
+  if (settings.ok) {
+    console.log(`  通过  ${JSON.stringify(settings.settings)}`)
+  } else {
+    failures.push(`settings:get 失败：${settings.message}`)
+    console.log(`  失败  ${settings.message}`)
+  }
+
+  // ---- 5. 页面确实加载了构建产物 ----
+  const title = await evaluate(
+    `({ title: document.title, url: location.href, hasRoot: !!document.getElementById('root') })`
+  )
   console.log(`\n[smoke] 页面状态：title="${title.title}" url="${title.url}" #root=${title.hasRoot}`)
   if (!title.hasRoot) failures.push('渲染进程没有 #root 挂载点，index.html 可能没加载')
+
+  cdp.close()
 
   if (failures.length > 0) {
     console.error(`\n[smoke] 失败 ${failures.length} 项：`)
