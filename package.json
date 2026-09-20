@@ -20,6 +20,7 @@
     "verify:icc": "node scripts/verify-icc-attach.mjs",
     "smoke": "electron-vite build && node scripts/smoke-context-isolation.mjs",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
+    "measure:500": "electron-vite build && node scripts/measure-500.mjs",
     "check": "npm run lint:no-resize && npm run typecheck && npm run test"
   },
   "dependencies": {
