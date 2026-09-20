@@ -1021,6 +1021,35 @@ CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run smoke
 
 **这是宿主环境的产物，不是项目问题。** 没有把 `emptyOutDir: false` 写进 Vite 配置，因为那样会让 `out/renderer/assets/` 里的旧哈希产物越积越多，而 electron-builder 会把这些死文件一起打进安装包。
 
+---
+
+## 收尾：冒烟脚本必须从确定状态出发
+
+给冒烟脚本加自动清理时，又踩到同一类毛病，值得单独记一笔。
+
+**现象**：加了「开跑前删掉 `tests/fixtures/processed`」之后，产物校验反而红了 —— 输出目录里什么都没有。
+
+**原因**：批次的输出目录**不是**写死的，而是从持久化设置里读的。上一轮结束时 `settings.json` 里存着 `outputDir: ...\_samedir`，而那个目录刚被删掉。于是这一轮把产物写回了 `_samedir`，校验却去看 `processed`。
+
+**这和 T14-6 那条滑块断言是同一个病根：断言依赖了上一轮留下的状态。**
+
+**处置**：清理范围扩到设置文件本身。
+
+```js
+const APP_SETTINGS = resolve(process.env['APPDATA'], 'picturemore', 'settings.json')
+rmSync(resolve(ROOT, 'tests/fixtures/processed'), { recursive: true, force: true })
+rmSync(resolve(ROOT, 'tests/fixtures/_samedir'), { recursive: true, force: true })
+rmSync(resolve(ROOT, 'tests/fixtures/_dropcase'), { recursive: true, force: true })
+rmSync(APP_SETTINGS, { force: true })
+```
+
+删设置文件等于模拟首次启动 —— 这正是验收测试该有的起点。
+
+**验证**：连跑两次，第二次开始时设置里还存着上一轮的 `_samedir`，仍然全绿。
+
+**这条经验值得推广**：验收脚本的第一步应该是「把状态复位到已知起点」，而不是「假设环境是干净的」。凡是跨越了上一次运行的断言，迟早会在某个时刻莫名其妙地红一次，然后被人当成 flaky 忽略掉 —— 那比没有测试更糟。
+
+
 
 
 

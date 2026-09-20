@@ -20,31 +20,49 @@
 
 | 顺序 | 文件 | 读它是为了 |
 |---|---|---|
-| 1 | `README.md` | 技术栈决策依据、Electron 红线、常用命令 |
-| 2 | `PRODUCT.md` | 产品定位、目标用户、能力边界、产品原则 |
-| 3 | `SPEC.md` | **开发依据**。架构、压缩算法、IPC 契约、陷阱、里程碑 |
-| 4 | `docs/superpowers/plans/2026-09-19-picturemore-v1.md` | **任务级实施计划**，14 个 Task，逐条勾选执行 |
-| 5 | `DESIGN.md` | 视觉规格：token、组件状态矩阵、动效、文案规则 |
-| 6 | `prototype/index.html` | **唯一视觉基准**，浏览器直接打开，与实现并排比对 |
+| 1 | `docs/decisions.md` | **先读这个**。每条实测结论 + 为什么不能按直觉写 |
+| 2 | `README.md` | 技术栈决策依据、Electron 红线、常用命令 |
+| 3 | `PRODUCT.md` | 产品定位、目标用户、能力边界、产品原则 |
+| 4 | `SPEC.md` | **开发依据**。架构、压缩算法、IPC 契约、陷阱、里程碑 |
+| 5 | `docs/superpowers/plans/2026-09-19-picturemore-v1.md` | **任务级实施计划**，14 个 Task（已完成，当执行记录看） |
+| 6 | `DESIGN.md` | 视觉规格：token、组件状态矩阵、动效、文案规则 |
+| 7 | `prototype/index.html` | **唯一视觉基准**，浏览器直接打开，与实现并排比对 |
 
 ---
 
-## 现在该做什么
+## 当前状态
 
-### 第一步：M0 技术验证（**不要跳，不要先搭项目**）
+**v1.0.0 已交付。** 14 个 Task 全部完成，`git tag v1.0.0`，安装包在 `release/图压压-1.0.0-setup.exe`（115MB）。
 
-计划里的 Task 0。跑两个脚本：
+所以下面这些不是「接下来要做的」，是**动手前必须知道的**。
 
-```
-scripts/verify-heic.mjs        # 验证 sharp 能不能读 HEIC
-scripts/verify-metadata.mjs    # 验证 withMetadata 的 ICC / orientation / EXIF 行为
-```
+### 动手前先看决策记录
 
-它们各自可能推翻 `SPEC.md` 里已写好的假设。结论写进 `docs/decisions.md`，再往下走。
+`docs/decisions.md` 是这份代码的地基。里面记着每一条「实测推翻了文档假设」的结论，
+每一条都写着「为什么不能按直觉写」：
 
-### 第二步：按计划执行
+| 条目 | 一句话 |
+|---|---|
+| M0-1 | sharp 预编译版能读 HEIC 容器头，但解不了像素 |
+| M0-2 | `heic-decode` 返回的 raw **已经应用过方向**，再写 orientation 标签会二次旋转 |
+| M0-3 | libheif-js 不带色彩管理，需要补挂 P3 标签 |
+| M0-4 | metadata 的正确写法是 `keepIccProfile().withExif({})`，**绝不能用 `withMetadata()`** |
+| T6-1 | 验证「有没有动像素」必须用无损格式，有损编码的噪声会淹掉信号 |
+| T10-1 | Tailwind v4 的工具类在 `@layer utilities`，**无层级的 CSS 永远压过它** |
+| T11-2 | `#root{display:contents}` —— 否则 `place-items:center` 会把窗口挤窄一半 |
 
-用 `executing-plans` 技能，从 Task 1 开始，一个 Task 一个 Task 做。每个 Task 结束都要跑 `npm run check`。
+### 本机环境的三个坑
+
+这三条每次开发都会撞，别再重新查：
+
+1. **启动 Electron 前剥掉 `NODE_OPTIONS` 与 `ELECTRON_RUN_AS_NODE`。**
+   后者置 1 时 `electron.exe` 退化成普通 Node，主进程 `require('electron')` 会命中项目自己的
+   `node_modules/electron`（导出的是路径字符串），报 `electron.app is undefined`。
+   症状是「同一个 exe，脚本放项目外能跑、放项目内就挂」。
+2. **构建/冒烟命令前加 `CODEBUDDY_SAFE_DELETE_ENABLED=0`。**
+   宿主会拦 `rmSync`（每轮超 50 次就拒），而 Vite 每次构建都清空 `out/`，必然撞上。
+   不要为此改 `emptyOutDir: false`——旧哈希产物会积在 `out/renderer/assets/` 里被打进安装包。
+3. **Git Bash 的 `/d/xxx` 不能传给 `node.exe` / `electron.exe`**，会被解析成 `D:\d\xxx`。用 `D:/xxx`。
 
 ---
 
@@ -58,19 +76,48 @@ scripts/verify-metadata.mjs    # 验证 withMetadata 的 ICC / orientation / EXI
 
 ---
 
+## 怎么验证
+
+```bash
+npm run check            # 主护栏：lint:no-resize + typecheck + 130 条测试（约 5 分钟）
+npm test                 # 只跑测试
+npm run test:watch       # 测试 watch 模式
+npm run smoke            # 端到端：构建 + 启动 + 18 组检查 + 5 张截图（需加上面的环境变量）
+npm run smoke:packaged   # 打包产物冒烟（先 npm run build）
+npm run fixtures         # 重新生成合成测试图
+npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
+```
+
+**验证的标准是「量结果」，不是「查定义」。** 这一条是被坑出来的：
+
+- 界面：量计算样式（尺寸/间距/字号/圆角/颜色）。只肉眼看，`T10-1` 和 `T11-2` 那两个坑都会漏过去。
+- 截图并排比对：硬指标覆盖不到对齐与配色。`npm run smoke` 会自动截 5 张到 `tests/fixtures/_shot-*.png`。
+- 零联网：用 CDP 监听请求，比「拔网线」严格。
+- 打包产物：真启动一次，验证原生模块从 `app.asar.unpacked` 加载。
+
+两个反复踩到的测试设计问题：
+
+- **断言「0 个」之前先证明监听是活的**，否则是空断言，什么都没验。
+- **断言不要依赖持久化状态**（设置文件、缓存、上轮产物）。要断言不变量，不是具体数值。
+
+完整套路见用户级技能 `electron-cdp-acceptance`。
+
+---
+
 ## 硬性约束速查
 
 | 项 | 规则 |
 |---|---|
 | 依赖 | 只有 `sharp`、`heic-decode`、`zustand` 三个运行时依赖。**不要加新的**。特别地：不用 `nanoid`（用 `crypto.randomUUID()`）、不用 `electron-store`、不用 `react-router-dom`、不装图标库 |
 | 图标 | 全站零图标、零 emoji。交互靠文字 |
-| 文案 | 只能取自 `SPEC.md` §8.4 文案表，不得自造词 |
+| 文案 | 只能取自 `SPEC.md` §8.4 文案表，不得自造词。**`docs/decisions.md` 里记着三处 SPEC 没给文案的缺口**，不要自己编 |
 | 标点 | 零 em-dash（`—` 和 `–` 都不行，中文里也不用"——"）。中黑点 `·` 每行最多一个 |
 | 圆角 | 只用 12 / 6 / 4 三个值 |
 | 字号 | 只用 12 / 15 / 20 / 36 四个值 |
 | 颜色 | 暖灰一族，不混冷灰。唯一有彩色是琥珀 `#8A5B00`，只在警示时出现 |
 | 动效 | 只动 `transform` / `opacity` / 颜色。必须有 `prefers-reduced-motion` 兜底 |
 | 网络 | 任何需要联网的依赖、CDN、云 API 一律不加。`src/main/security.ts` 在运行时也会拦 |
+| 尺寸 | 改界面先跑 `npm run smoke`。它会量 35 项布局硬指标，对不上就是和原型不一致 |
 
 ---
 
@@ -80,13 +127,16 @@ scripts/verify-metadata.mjs    # 验证 withMetadata 的 ICC / orientation / EXI
 
 `DESIGN.md` 是它的文字化规格。两者冲突时以原型为准。
 
+**已知例外（唯一一处）**：原型的空态有个 CSS 事故——`.meta{display:flex}` 盖掉了 `[hidden]` 的 `display:none`，导致空列表时元信息行还显示「共 11 张」。原型 JS 的意图与 `DESIGN.md` §4 都要求它消失，所以实现按意图走，没照抄渲染结果。见 `docs/decisions.md` 的 T12-2。
+
 ---
 
 ## 遇到不确定时
 
-1. 先查 `SPEC.md` §14 已知陷阱
-2. 再查 `README.md` 的红线清单
-3. 都不覆盖，就问用户，**不要猜**
+1. 先查 `docs/decisions.md`（那里有全部实测结论）
+2. 再查 `SPEC.md` §14 已知陷阱
+3. 再查 `README.md` 的红线清单
+4. 都不覆盖，就问用户，**不要猜**
 
 ---
 
@@ -94,5 +144,15 @@ scripts/verify-metadata.mjs    # 验证 withMetadata 的 ICC / orientation / EXI
 
 - 产品定义、范围收敛（v1 只做压缩，格式转换是输出选项）
 - 界面设计已定稿并经用户审核通过，视觉基准已冻结在 `prototype/index.html`
-- 技术风险已识别（HEIC 解码、metadata 行为），验证脚本已备好
-- 代码：**一行都没写**
+- M0 技术验证（HEIC 解码、metadata 行为），结论在 `docs/decisions.md`
+- 图像引擎：`src/main/image/` 全部模块 + 黄金测试（9 张 fixture × 4 个压缩档）
+- 界面：12 个组件，与原型逐项对齐，冒烟脚本 35 项布局硬指标 + 5 张截图
+- 全链路：拖拽 → probe → 压缩 → 写盘 → 逐行进度，端到端跑通
+- 打包：NSIS 安装包 115MB，包内容核查干净
+
+### 还挂着的（需要用户拍板，不要自己决定）
+
+- **Android 的 sRGB HEIC 会被错标成 P3**（画面偏艳）。修法已明确，但**手上没有 Android HEIC 样张，改不了就没法验**，所以没动
+- **三处 SPEC 没给文案**：「文件不存在 / 无读权限」、SPEC §9 的两句行内文案（「这张已经压到底了」/「质量已到下限，只压到 {x}」）、「空文件夹给提示」
+- **`TokenProbe` 要不要留在渲染树里**（6 个隐藏 div，是「变量定义了但工具类没生成」这类问题的唯一抓手）
+

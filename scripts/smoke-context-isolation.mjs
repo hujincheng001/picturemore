@@ -33,6 +33,24 @@ if (!existsSync(MAIN) || !existsSync(RENDERER)) {
   process.exit(1)
 }
 
+/**
+ * 开跑前把状态清干净，让每次都是「全新安装」。
+ *
+ * 不清会踩两个坑，都是同一类毛病 —— **断言依赖了上一轮留下的状态**：
+ * 1. `tests/fixtures/processed` 里积下 `x (2).jpg`、`x (3).jpg`，产物校验只能靠排序猜
+ * 2. `%APPDATA%\picturemore\settings.json` 里存着上一轮的存放位置，
+ *    于是批次会写到那个目录去，而不是默认的 `<第一张图目录>/processed`
+ *
+ * 清设置文件等于模拟首次启动，这正是验收测试该有的起点。
+ * 应用名来自 package.json 的 `name`（不是 productName），所以路径是 picturemore。
+ */
+const APP_SETTINGS = resolve(process.env['APPDATA'] ?? '', 'picturemore', 'settings.json')
+
+rmSync(resolve(ROOT, 'tests/fixtures/processed'), { recursive: true, force: true })
+rmSync(resolve(ROOT, 'tests/fixtures/_samedir'), { recursive: true, force: true })
+rmSync(resolve(ROOT, 'tests/fixtures/_dropcase'), { recursive: true, force: true })
+rmSync(APP_SETTINGS, { force: true })
+
 /** electron 包导出的是可执行文件路径，不是 API */
 const electronBin = require('electron')
 
