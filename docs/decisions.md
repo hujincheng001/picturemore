@@ -954,16 +954,73 @@ CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run build
 
 **这不是产品问题，换台机器或换个 shell 就不会遇到。** 记在这里免得下次再查一遍。
 
-### T14-5：还没做的验收项
+### T14-5：SPEC §11 Step 3 的三条「需要人来点」，实际有两条能自动化
 
-SPEC §11 Step 3 的「干净机器验收」只完成了一部分：
+计划把这三条列为手工验收。但其中两条用 CDP 能做得比手工更严格，已经补进冒烟脚本：
 
-- [x] 安装、启动（在本机跑 `release/win-unpacked/图压压.exe`，走通了完整流程）
-- [ ] **拔网线跑通完整流程** —— 没做。不过运行时零联网有另外两层保障：`security.ts` 的 `onBeforeRequest` 拦截 + 打包后才注入的 CSP（`connect-src 'none'`）
-- [ ] 输出目录选到原图所在目录、确认原图未被改动 —— 没做。`resolveOutputPath` 的防覆盖有单测（6 条），端到端这条还没走
-- [ ] 键盘走完整个流程 —— 没做。radiogroup / focus-visible 的语义都在，但没实测过 Tab 顺序
+**① 运行时零联网（原来是「拔网线跑通」）**
 
-这三条需要人来点，我没法自动化。
+拔网线只能证明「断网时能用」，证明不了「根本没有发出请求」。改成用 CDP 的 `Network.enable` + `Network.requestWillBeSent` 全程监听，然后断言外部请求数为 0：
+
+```
+[smoke] 运行时零联网：
+  通过  监听到 3 个请求（证明监听是活的）
+  通过  外部请求 0 个（承诺一：运行时零联网）
+        请求协议：file
+```
+
+**这里有个坑值得记**：断言「0 个外部请求」之前必须先证明监听是活的。第一次跑的时候监听是在页面加载完之后才开的，一个请求都没收到 —— 那种情况下「外部请求 0 个」是空断言，什么都没验。所以现在把这一段放在一次 `Page.reload()` 之后，用那次刷新产生的 `file://` 请求证明监听有效。
+
+**② 输出到原图目录、原图未被改动（原来也是手工）**
+
+改成哈希比对：把两张 fixture 复制到临时目录，把存放位置切到那个目录，跑一批，然后
+
+- 原图 sha256 必须一模一样
+- 目录里必须多出带 ` (2)` 后缀的产物，而不是把原图覆盖掉
+
+```
+[smoke] 输出到原图目录：
+  通过  存放位置 = D:\pictureMore\tests\fixtures\_samedir更改
+  通过  原图未改动：oriented-6.jpg
+  通过  原图未改动：flat-solid.png
+  通过  产出 2 个防覆盖文件：flat-solid (2).png, oriented-6 (2).jpg
+```
+
+用 jpg 与 png 各一张是有意的：输出格式保持原格式时，候选名会与源文件同名，正好触发防覆盖分支。HEIC 不适用（它必然输出成 `.jpg`，撞不上名）。
+
+**③ 键盘走完整个流程**（原来也是手工）
+
+用 CDP 的 `Input.dispatchKeyEvent` 连按 Tab，记录 `document.activeElement` 的序列：
+
+```
+顺序：INPUT:range -> BUTTON[radio] x4 -> BUTTON x6 -> INPUT:range
+  通过  滑块可 Tab 到 / 格式选项可 Tab 到 / 按钮可 Tab 到
+  通过  按钮聚焦有可见焦点环（outline: solid 2px）
+  通过  滑块外框已按原型去掉（outline: none 3px）
+```
+
+**最后一条看着像失败，其实是原型的刻意设计**：`.slider:focus-visible{outline:none}` 把外框去掉了，改成在拇指上加一圈 `box-shadow`（`.slider:focus-visible::-webkit-slider-thumb`）。所以断言写成「外框确实被去掉了」，而不是「有外框」。第一版写反了，报了个假失败。
+
+**仍然需要人来点的**：装到另一台没装过 Node 的机器上跑一遍。这个我没法做。
+
+### T14-6：打包版与开发版共用同一个设置文件
+
+`app.getPath('userData')` 在两处都是 `%APPDATA%\picturemore`（Electron 取的是 package.json 的 `name`，不是 `productName`）。对产品来说这是对的 —— 同一个产品的设置本来就该共用。
+
+但对测试有影响：`smoke:packaged` 用 45% 跑了一批，把 45 写进了共享的 settings.json，接着 `smoke` 跑的时候滑块初始值就是 45 而不是 65，于是布局检查里那条 `valueText === '65%'` 报了假失败。
+
+**处置：断言不依赖持久化状态。** 改成断言「百分数显示与滑块的值同步」+「滑块的 min/max/step 与原型一致」—— 那才是真正要守的不变量。
+
+### T14-7：宿主环境的安全删除护栏又拦了一次
+
+`npm run smoke` 里带 `electron-vite build`，而 Vite 每次构建都会清空 `out/`，撞上同一个 `rmSync` 拦截（T14-4 记过）。解法一样：
+
+```bash
+CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run smoke
+```
+
+**这是宿主环境的产物，不是项目问题。** 没有把 `emptyOutDir: false` 写进 Vite 配置，因为那样会让 `out/renderer/assets/` 里的旧哈希产物越积越多，而 electron-builder 会把这些死文件一起打进安装包。
+
 
 
 

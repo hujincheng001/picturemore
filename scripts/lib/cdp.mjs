@@ -35,12 +35,14 @@ export function getJson(url) {
   })
 }
 
-/** 连上某个 target 的 websocket，返回一个够用的 send() */
+/** 连上某个 target 的 websocket，返回一个够用的 send() 与 on() */
 export function connect(wsUrl) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl)
     let nextId = 1
     const pending = new Map()
+    /** method -> 一组处理函数。用于订阅 CDP 事件（比如 Network.requestWillBeSent） */
+    const listeners = new Map()
 
     ws.addEventListener('open', () => {
       resolve({
@@ -51,12 +53,31 @@ export function connect(wsUrl) {
             ws.send(JSON.stringify({ id, method, params }))
           })
         },
+        /**
+         * 订阅 CDP 事件。返回退订函数。
+         *
+         * 注意：调用方要先 `send('Xxx.enable')`，否则端点不会推事件过来。
+         */
+        on(method, handler) {
+          const set = listeners.get(method) ?? new Set()
+          set.add(handler)
+          listeners.set(method, set)
+          return () => set.delete(handler)
+        },
         close: () => ws.close()
       })
     })
     ws.addEventListener('error', reject)
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data)
+      // 有 id 的是应答，没 id 的是事件
+      if (msg.id === undefined) {
+        const set = listeners.get(msg.method)
+        if (set !== undefined) {
+          for (const h of set) h(msg.params)
+        }
+        return
+      }
       const entry = pending.get(msg.id)
       if (!entry) return
       pending.delete(msg.id)

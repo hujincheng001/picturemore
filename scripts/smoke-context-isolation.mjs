@@ -12,14 +12,15 @@
  */
 
 import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
-import { get } from 'node:http'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import sharp from 'sharp'
+import { connect, evaluate as cdpEvaluate, getJson, waitForPage } from './lib/cdp.mjs'
 
 const require = createRequire(import.meta.url)
 const PORT = 9333
@@ -110,98 +111,29 @@ const stderrChunks = []
 child.stderr.on('data', (d) => stderrChunks.push(d.toString()))
 child.stdout.on('data', (d) => stderrChunks.push(d.toString()))
 
-/**
- * 用 node:http 而不是 fetch 取 CDP 端点列表。
- *
- * fetch 走 undici 的全局连接池，会留下 keep-alive 的 socket 挂住事件循环，
- * 逼得脚本只能在末尾 process.exit() 强杀进程 —— 那正是 Windows 上 libuv
- * 断言和"断言全通过但退出码非 0"的来源。http.get 默认不开 keepAlive，
- * 事件循环能自然排空。
- */
-function getJson(url) {
-  return new Promise((resolve, reject) => {
-    const req = get(url, (res) => {
-      let body = ''
-      res.setEncoding('utf8')
-      res.on('data', (c) => (body += c))
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(body))
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
-    req.on('error', reject)
-    req.setTimeout(2000, () => req.destroy(new Error('timeout')))
-  })
-}
-
-/** 等 CDP 端点起来并拿到渲染页的 websocket 地址 */
-async function findPageTarget(timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`Electron 提前退出，退出码 ${child.exitCode}\n${stderrChunks.join('')}`)
-    }
-    try {
-      const targets = await getJson(`http://127.0.0.1:${PORT}/json/list`)
-      const page = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl)
-      if (page) return page
-    } catch {
-      // 端口还没起来，继续等
-    }
-    await sleep(300)
-  }
-  throw new Error(`等 ${timeoutMs}ms 仍没有可调试的渲染页\n${stderrChunks.join('')}`)
-}
-
-/** 极简 CDP 客户端：够用即可，不引第三方库 */
-function connect(wsUrl) {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(wsUrl)
-    let nextId = 1
-    const pending = new Map()
-
-    ws.addEventListener('open', () => {
-      resolve({
-        send(method, params = {}) {
-          const id = nextId++
-          return new Promise((res, rej) => {
-            pending.set(id, { res, rej })
-            ws.send(JSON.stringify({ id, method, params }))
-          })
-        },
-        close: () => ws.close()
-      })
-    })
-    ws.addEventListener('error', reject)
-    ws.addEventListener('message', (ev) => {
-      const msg = JSON.parse(ev.data)
-      const entry = pending.get(msg.id)
-      if (!entry) return
-      pending.delete(msg.id)
-      if (msg.error) entry.rej(new Error(msg.error.message))
-      else entry.res(msg.result)
-    })
-  })
-}
-
 async function main() {
-  const target = await findPageTarget()
+  const failures = []
+
+  const target = await waitForPage(PORT, {
+    onTick: () => {
+      if (child.exitCode !== null) {
+        throw new Error(`Electron 提前退出，退出码 ${child.exitCode}\n${stderrChunks.join('')}`)
+      }
+    }
+  })
   const cdp = await connect(target.webSocketDebuggerUrl)
   await cdp.send('Runtime.enable')
 
-  const failures = []
-  const evaluate = async (expression) => {
-    const { result } = await cdp.send('Runtime.evaluate', {
-      expression,
-      returnByValue: true,
-      awaitPromise: true
-    })
-    if (result.subtype === 'error') throw new Error(result.description)
-    return result.value
-  }
+  const evaluate = (expression) => cdpEvaluate(cdp, expression)
+
+  // ---- 0. 全程监听网络请求（承诺一：运行时零联网）----
+  // 比「拔网线」更严格：拔网线只能证明断网时能用，这里能证明**根本没有发出请求**。
+  // 必须在任何交互之前打开，否则会漏掉早期的请求。
+  const requests = []
+  await cdp.send('Network.enable')
+  cdp.on('Network.requestWillBeSent', (p) => {
+    requests.push(p.request?.url ?? '(unknown)')
+  })
 
   // ---- 1. 进程隔离：Node 能力不能泄漏到渲染层 ----
   const isoExpr = `(() => {
@@ -434,7 +366,21 @@ async function main() {
       paneGap: px(pane, 'rowGap'),
       paneBorderRight: px(pane, 'borderRightWidth'),
       valueFontSize: px(value, 'fontSize'),
-      valueText: value ? value.textContent : null,
+      /**
+       * 百分数显示是否与滑块同步。
+       *
+       * 刻意**不**断言具体数值：缩小比例是持久化设置，打包版与开发版共用同一个
+       * settings.json（都是 %APPDATA%\picturemore），别的脚本跑过之后这里就不是 65 了。
+       * 要守的不变量是「显示跟着滑块走」，以及滑块自己的取值范围与原型一致。
+       */
+      valueMatchesSlider: (() => {
+        const slider = document.querySelector('input[type="range"]')
+        if (value === null || slider === null) return null
+        return value.textContent === slider.value + '%'
+      })(),
+      sliderMin: (() => document.querySelector('input[type="range"]')?.getAttribute('min') ?? null)(),
+      sliderMax: (() => document.querySelector('input[type="range"]')?.getAttribute('max') ?? null)(),
+      sliderStep: (() => document.querySelector('input[type="range"]')?.getAttribute('step') ?? null)(),
       radioHeight: px(checked, 'height'),
       radioRadius: px(checked, 'borderRadius'),
       radioCount: document.querySelectorAll('[role="radio"]').length,
@@ -486,7 +432,10 @@ async function main() {
     paneGap: '26px',
     paneBorderRight: '1px',
     valueFontSize: '36px',
-    valueText: '65%',
+    valueMatchesSlider: true,
+    sliderMin: '20',
+    sliderMax: '90',
+    sliderStep: '5',
     radioHeight: '32px',
     radioRadius: '6px',
     radioCount: 4,
@@ -634,14 +583,203 @@ async function main() {
     console.log(`  失败  ${e.message}`)
   }
 
-  // ---- 14. 页面确实加载了构建产物 ----
+  // ---- 15. 输出到原图所在目录，原图必须原封不动 ----
+  // SPEC §9：「用户选了原图所在目录 + 保持原格式 → resolveOutputPath 追加 (2)，绝不覆盖」。
+  // 这条既有单测（naming.spec.ts 6 条），也有这里的端到端：拿哈希比对原图有没有被动过。
+  console.log('\n[smoke] 输出到原图目录：')
+  try {
+    const caseDir = resolve(ROOT, 'tests/fixtures/_samedir')
+    rmSync(caseDir, { recursive: true, force: true })
+    mkdirSync(caseDir, { recursive: true })
+
+    // 用 jpg 与 png 各一张：输出格式保持原格式时，候选名会与源文件同名，
+    // 正好触发防覆盖分支。HEIC 不适用（它必然输出成 .jpg，不会撞名）
+    const sources = ['oriented-6.jpg', 'flat-solid.png'].map((f) => {
+      const dst = resolve(caseDir, f)
+      copyFileSync(resolve(ROOT, 'tests/fixtures', f), dst)
+      return dst
+    })
+    const hashOf = (p) => createHash('sha256').update(readFileSync(p)).digest('hex')
+    const before = new Map(sources.map((p) => [p, hashOf(p)]))
+
+    // 把存放位置改成这个目录。store 在 init 时读设置，所以改完要重新加载页面
+    await evaluate(
+      `window.pictureMore.setSettings({ outputDir: ${JSON.stringify(caseDir)} })`
+    )
+    await cdp.send('Page.reload')
+    await cdp.send('Runtime.enable')
+    for (let i = 0; i < 60; i++) {
+      const ready = await evaluate(`document.querySelector('main[aria-label="图片列表"]') !== null`)
+      if (ready === true) break
+      await sleep(250)
+    }
+
+    // 拖入这两张
+    for (const type of ['dragEnter', 'dragOver', 'drop']) {
+      await cdp.send('Input.dispatchDragEvent', {
+        type,
+        x: 640,
+        y: 300,
+        data: { items: [], files: sources, dragOperationsMask: 1 }
+      })
+    }
+    let rows = 0
+    for (let i = 0; i < 60; i++) {
+      rows = await evaluate(`document.querySelectorAll('main li').length`)
+      if (rows === sources.length) break
+      await sleep(250)
+    }
+    if (rows !== sources.length) throw new Error(`拖入后只有 ${rows} 行`)
+
+    // 确认存放位置确实切到了原图目录
+    const shown = await evaluate(
+      `document.querySelector('[aria-label="更改图片存放位置"]').textContent`
+    )
+    const dirOk = shown.includes(caseDir)
+    if (!dirOk) failures.push(`存放位置没有切到原图目录，显示的是「${shown}」`)
+    console.log(`  ${dirOk ? '通过' : '失败'}  存放位置 = ${shown}`)
+
+    // 跑
+    await evaluate(`[...document.querySelectorAll('aside button')].find((b) => /^压缩这/.test(b.textContent)).click()`)
+    let states = []
+    for (let i = 0; i < 240; i++) {
+      states = await evaluate(`[...document.querySelectorAll('main li')].map((li) => li.dataset.state)`)
+      if (states.length > 0 && states.every((s) => s === 'done' || s === 'undershot' || s === 'failed')) break
+      await sleep(500)
+    }
+    console.log(`        行状态：${states.join(', ')}`)
+
+    // 原图哈希必须一模一样
+    for (const p of sources) {
+      const same = hashOf(p) === before.get(p)
+      if (!same) failures.push(`原图被改动了：${basename(p)}`)
+      console.log(`  ${same ? '通过' : '失败'}  原图未改动：${basename(p)}`)
+    }
+
+    // 目录里应该多出带 (2) 后缀的产物，而不是把原图覆盖掉
+    const produced = readdirSync(caseDir).filter((f) => /\(2\)/.test(f))
+    const producedOk = produced.length === sources.length
+    if (!producedOk) {
+      failures.push(`应产出 ${sources.length} 个 (2) 后缀的文件，实际 ${produced.length} 个`)
+    }
+    console.log(
+      `  ${producedOk ? '通过' : '失败'}  产出 ${produced.length} 个防覆盖文件：${produced.join(', ') || '(无)'}`
+    )
+  } catch (e) {
+    failures.push(`输出到原图目录的检查失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
+  }
+
+  // ---- 15b. 运行时零联网（承诺一）----
+  // 比 SPEC §11 说的「拔网线」更严格：拔网线只能证明断网时能用，
+  // 这里能证明**根本没有发出过外部请求**。
+  //
+  // 放在上一节之后是有意的：上面那次 Page.reload 会产生一批 file:// 请求，
+  // 正好用来证明监听本身是活的（如果 requests 是空的，说明监听没生效，
+  // 「零外部请求」就成了空断言）。
+  console.log('\n[smoke] 运行时零联网：')
+  {
+    const external = requests.filter((u) => !/^(file|devtools|blob|data):/.test(u))
+    const kinds = [...new Set(requests.map((u) => u.split(':')[0]))]
+
+    // 监听本身要活着，否则下面的 0 没有意义
+    const alive = requests.length > 0
+    if (!alive) failures.push('一个请求都没监听到，说明 Network 监听没生效，零外部请求这个结论不成立')
+    console.log(`  ${alive ? '通过' : '失败'}  监听到 ${requests.length} 个请求（证明监听是活的）`)
+
+    const ok = external.length === 0
+    if (!ok) {
+      failures.push(`出现了 ${external.length} 个外部请求：${external.slice(0, 5).join(', ')}`)
+    }
+    console.log(`  ${ok ? '通过' : '失败'}  外部请求 ${external.length} 个（承诺一：运行时零联网）`)
+    console.log(`        请求协议：${kinds.join(', ') || '(无)'}`)
+  }
+
+  // ---- 16. 键盘可达性 ----
+  // SPEC §10.3 要求「键盘走完整个流程（Tab / Space / Enter / 方向键调滑块）」。
+  // 这里验 Tab 顺序能覆盖全部可交互元素，以及聚焦时有可见的焦点环。
+  console.log('\n[smoke] 键盘：')
+  try {
+    const pressTab = async () => {
+      for (const type of ['rawKeyDown', 'keyUp']) {
+        await cdp.send('Input.dispatchKeyEvent', {
+          type,
+          windowsVirtualKeyCode: 9,
+          nativeVirtualKeyCode: 9,
+          code: 'Tab',
+          key: 'Tab'
+        })
+      }
+      await sleep(60)
+    }
+
+    // 从文档开头开始走
+    await evaluate(`document.activeElement && document.activeElement.blur()`)
+    const visited = []
+    for (let i = 0; i < 12; i++) {
+      await pressTab()
+      const info = await evaluate(`(() => {
+        const el = document.activeElement
+        if (!el || el === document.body) return null
+        const cs = getComputedStyle(el)
+        return {
+          tag: el.tagName,
+          type: el.getAttribute('type'),
+          role: el.getAttribute('role'),
+          name: el.getAttribute('aria-label') || (el.textContent || '').trim().slice(0, 10),
+          outline: cs.outlineStyle + ' ' + cs.outlineWidth,
+          ring: cs.boxShadow
+        }
+      })()`)
+      if (info === null) break
+      visited.push(info)
+    }
+
+    // 必须有可聚焦元素，且滑块与格式选项要能被 Tab 到
+    const reachable = visited.map((v) => `${v.tag}${v.type ? ':' + v.type : ''}${v.role ? '[' + v.role + ']' : ''}`)
+    console.log(`        顺序：${reachable.join(' -> ') || '(空)'}`)
+
+    const hasSlider = visited.some((v) => v.type === 'range')
+    const hasRadio = visited.some((v) => v.role === 'radio')
+    const hasButton = visited.some((v) => v.tag === 'BUTTON')
+    if (!hasSlider) failures.push('Tab 顺序里没有滑块')
+    if (!hasRadio) failures.push('Tab 顺序里没有输出格式选项')
+    if (!hasButton) failures.push('Tab 顺序里没有按钮')
+    console.log(`  ${hasSlider ? '通过' : '失败'}  滑块可 Tab 到`)
+    console.log(`  ${hasRadio ? '通过' : '失败'}  格式选项可 Tab 到`)
+    console.log(`  ${hasButton ? '通过' : '失败'}  按钮可 Tab 到`)
+
+    // 焦点反馈：全局 :focus-visible 给 2px 实线环（index.css）。
+    // 用按钮验 —— 滑块是刻意例外，见下面的说明。
+    const buttonFocused = visited.find((v) => v.tag === 'BUTTON')
+    if (buttonFocused !== undefined) {
+      const ok = /solid/.test(buttonFocused.outline)
+      if (!ok) failures.push(`按钮聚焦时没有可见焦点环：outline=${buttonFocused.outline}`)
+      console.log(`  ${ok ? '通过' : '失败'}  按钮聚焦有可见焦点环（outline: ${buttonFocused.outline}）`)
+    }
+
+    // 滑块是**有意的例外**：原型的 `.slider:focus-visible{outline:none}` 把外框去掉了，
+    // 改成在拇指上加一圈 box-shadow（`.slider:focus-visible::-webkit-slider-thumb`）。
+    // 所以这里断言的是「外框确实被去掉了」，而不是「有外框」。
+    const sliderFocused = visited.find((v) => v.type === 'range')
+    if (sliderFocused !== undefined) {
+      const ok = /none/.test(sliderFocused.outline)
+      if (!ok) failures.push(`滑块不应该有外框（原型的焦点环在拇指上）：outline=${sliderFocused.outline}`)
+      console.log(`  ${ok ? '通过' : '失败'}  滑块外框已按原型去掉（outline: ${sliderFocused.outline}）`)
+    }
+  } catch (e) {
+    failures.push(`键盘检查失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
+  }
+
+  // ---- 17. 页面确实加载了构建产物 ----
   const title = await evaluate(
     `({ title: document.title, url: location.href, hasRoot: !!document.getElementById('root') })`
   )
   console.log(`\n[smoke] 页面状态：title="${title.title}" url="${title.url}"`)
   if (!title.hasRoot) failures.push('渲染进程没有 #root 挂载点，index.html 可能没加载')
 
-  // ---- 15. 原型截图 ----
+  // ---- 18. 原型截图 ----
   // 放在最后：导航过去之后这一页就是原型了，应用那边再也测不了。
   try {
     const protoShot = await shootPrototype(cdp)

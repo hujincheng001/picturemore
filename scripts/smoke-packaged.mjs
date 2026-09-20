@@ -92,6 +92,29 @@ try {
   log(boot.hasApi, `window.pictureMore 已挂载`)
   log(boot.hasRoot, `#root 已挂载（title="${boot.title}"）`)
 
+  // ---- 联网拦截：CSP 只在打包后才注入 ----
+  // `security.ts` 里的 CSP 是 `if (app.isPackaged)` 才挂的，所以这条只能在打包产物上验。
+  // 两层保障一起看：connect-src 'none' 的 CSP + onBeforeRequest 的运行时拦截。
+  console.log('\n[packaged] 联网拦截（承诺一）：')
+  const netCheck = await evaluate(
+    cdp,
+    `(async () => {
+      const out = { attempts: [] }
+      for (const url of ['https://example.com/', 'http://127.0.0.1:1/']) {
+        try {
+          await fetch(url, { mode: 'no-cors' })
+          out.attempts.push({ url, blocked: false })
+        } catch (e) {
+          out.attempts.push({ url, blocked: true, message: String(e && e.message || e) })
+        }
+      }
+      return out
+    })()`
+  )
+  for (const a of netCheck.attempts) {
+    log(a.blocked, `${a.url} 被拦截${a.blocked ? `（${a.message}）` : '（没拦住！）'}`)
+  }
+
   // ---- probe：这一步会真正调用 sharp 与 heic-decode ----
   // sharp 的原生模块在 app.asar.unpacked 里，heic-decode 的 WASM 在 asar 里。
   // asarUnpack 配错的话这里就会炸。
