@@ -1,0 +1,33 @@
+/**
+ * 主按钮。与 prototype/index.html 的 `.cta` 一一对应。
+ *
+ * 用 CSS Module 而不是工具类：颜色来自 component 层 token（`--cta-bg` 等），
+ * 写成 `bg-[var(--cta-bg)]` 能跑但会把 token 名散进组件，而且 hover / active /
+ * disabled 三个状态混在类名串里可读性差。这段和原型逐行对得上，留在 CSS 里更好比对。
+ */
+
+.cta {
+  display: block;
+  width: 100%;
+  height: 48px;
+  border-radius: var(--radius-control);
+  background: var(--cta-bg);
+  color: var(--cta-fg);
+  font-weight: 500;
+  transition: background-color 0.16s ease, transform 0.1s ease;
+}
+
+.cta:hover {
+  background: var(--cta-bg-hover);
+}
+
+.cta:active {
+  transform: scale(0.99);
+}
+
+.cta[disabled] {
+  background: var(--cta-bg-disabled);
+  color: var(--cta-fg-disabled);
+  cursor: default;
+  transform: none;
+}

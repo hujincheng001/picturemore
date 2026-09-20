@@ -626,6 +626,75 @@ Tailwind v4 把 `--color-X` 直接映射成 `bg-X` / `text-X` / `border-X`。而
 
 SPEC §8.2 原有的每一行都保持逐字不变。
 
+---
+
+## Task 11 决策：两个只有真渲染才能发现的坑
+
+左栏八个组件按原型逐项搬运。硬指标（尺寸/间距/字号/圆角/颜色）全部对上了，但过程中撞到两个**静态看代码绝对看不出来、也不报任何错**的问题。两个都是靠「量计算样式 + 截图并排看」抓到的。
+
+### T11-1：无层级的全局重置会盖掉所有 Tailwind 工具类
+
+原型是原生 CSS，全局段里有这么一条：
+
+```css
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+```
+
+照搬到 `index.css` 之后，**每一个 `<button>` 上的 `bg-*` / `border-*` / `text-*` 全部静默失效**。
+
+原因不是选择器权重：Tailwind v4 把工具类发在 `@layer utilities` 里，而 CSS 的层叠规则是**无层级的规则永远压过有层级的规则，与权重无关**。`button{...}` 没进任何 layer，所以它赢了所有工具类。
+
+症状极具迷惑性：
+
+| 元素 | 表现 |
+|---|---|
+| `<div>` 上的 `bg-bone-200` | 正常 |
+| `<aside>` 上的 `border-r border-line` | 正常 |
+| `<button>` 上的 `border` / `bg-bone-050` / `text-fg` | **全部失效** |
+
+所以「token 检查」全绿（探针用的是 div），但格式选项没有边框、没有底色，存放位置的选择器也没有框。截图一眼就看出来了，量 `borderTopWidth` 也立刻暴露（`0px`）。
+
+**处置**：整个全局重置放进 `@layer base`。Tailwind 的层序是 `theme, base, components, utilities`，base 排在 utilities 前面，工具类恢复正常。
+
+**顺带记一条**：CSS Module 的样式是无层级的（不走 Tailwind 的 layer），所以 `ShrinkSlider.module.css` / `PrimaryButton.module.css` 反而一直正常。这意味着 CSS Module 会压过工具类 —— 组件里两者混用时要知道谁赢。
+
+### T11-2：`#root` 会把窗口挤窄一半
+
+`body` 是 `display:grid; place-items:center`。`place-items` 里的 `justify-items:center` 会让 grid item **按内容收缩**，而不是撑满。
+
+原型里没有 `#root`，`.window` 直接就是 body 的 grid item，`width:min(980px,100%)` 里的 `100%` 解析成整个网格区宽度（视口减 64px 内边距），拿到 900px。
+
+加了 React 的挂载点之后，收缩发生在 `#root` 上：它按内容取到 max-content（实测 **478px**），窗口再取 `min(980px,100%)` 就只能拿到 478px。
+
+**这个坑的表现也很有欺骗性**：左栏宽度写死 328px，看起来完全正常；只有右栏被挤扁。而 Task 11 阶段右栏还是占位符，所以「左栏看起来对」会把问题掩盖过去。
+
+**处置**：`#root { display: contents }`，让它自己不生成盒子，窗口重新成为 body 的 grid item，结构与原型完全一致。
+
+### T11-3：冒烟检查加了两组
+
+**① 左栏布局硬指标（23 项）**
+从原型 CSS 里逐条读出来的可断言项：窗口 12px 圆角、标题行 64px 高 32px 内边距、左栏 328px 宽 28/32 内边距 26px 间距、百分数 36px、格式按钮 32px 高 6px 圆角（未选中发丝线 #D8D4CC + 三级灰字，选中主字色 + 骨白底 #FBFAF8）、存放位置 40px、CTA 48px。
+
+窗口尺寸不写死，断言的是原型那条规则本身（`min(980px,100%)` 与 `min(768px,calc(100vh - 96px))`）—— 视口大小随操作系统的窗口边框与显示缩放变化，写死换台机器就红。
+
+**② 截图并排比对**
+AGENTS.md 的标准是「肉眼能看出差异就是没做完」，硬指标覆盖不到错位、对齐、配色这类问题。冒烟脚本现在会把应用和原型按同一个视口（980x768）各截一张，落到 `tests/fixtures/_shot-app.png` 与 `_shot-prototype.png`（下划线前缀，已在 .gitignore 里）。
+
+上面两个坑都是截图看出来的。**这一步值得保留**，Task 12 / 13 还会继续用。
+
+原型的截图靠把同一页导航过去再截 —— Electron 的调试端点不支持 `Target.createTarget`（浏览器级端点返回 `Not supported`），为了截一张图去开第二个 BrowserWindow 又太侵入。
+
+### T11-4：四态文案抽成纯函数单独测
+
+`lib/note.ts` 放判定逻辑，`QualityNote.tsx` 只渲染。这样能脱离 React 直接测。
+
+**顺序错了不会报错，只会给错提示**，所以值得专门守：选了 PNG 又把滑块拖到 80%、列表里还有透明图时，必须说「PNG 压不动」而不是「能看出压缩痕迹」。11 条测试覆盖四种状态的优先级、70% 边界（70 本身不算越线）、以及文案的写作纪律（零 em-dash、中黑点每行最多一个、无 emoji）。
+
+### T11-5：`lib/format.ts` 提前到 Task 11
+
+计划把 `lib/format.ts` 列在 Task 12，但 `EstimateLine` 现在就要用 `formatBytes`。提前建了，Task 12 直接用，不用重复造。
+
+
 
 
 

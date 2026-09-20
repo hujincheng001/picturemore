@@ -1,0 +1,92 @@
+/**
+ * 滑块的原生控件样式。
+ *
+ * 为什么不用工具类：`::-webkit-slider-thumb` / `::-moz-range-thumb` 这些伪元素
+ * 没法用 Tailwind 的类表达（`[&::-webkit-slider-thumb]:` 这种写法能写但可读性极差，
+ * 而且这段样式和 prototype/index.html 里的 `.slider` 是一一对应的，留在 CSS 里更好比对）。
+ * 计划 Task 11 Step 1 也是这么要求的。
+ *
+ * 动态部分（已填充比例、填充色）通过 CSS 变量 `--pct` / `--fill` 从组件传进来，
+ * 这样不用每次重写整段渐变。
+ */
+
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* 焦点环由全局的 :focus-visible 统一给，滑块自己的 outline 会让轨道错位 */
+.slider:focus-visible {
+  outline: none;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--fill) 0 var(--pct), var(--track) var(--pct) 100%);
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: var(--color-bg-surface);
+  border: 1.5px solid var(--fill);
+  transition: transform 0.16s var(--ease-out-expo), box-shadow 0.16s ease;
+}
+
+.slider:hover::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+
+.slider:active::-webkit-slider-thumb {
+  transform: scale(0.94);
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px rgba(20, 20, 20, 0.13);
+}
+
+.slider::-moz-range-track {
+  height: 2px;
+  border-radius: 2px;
+  background: var(--track);
+}
+
+.slider::-moz-range-progress {
+  height: 2px;
+  border-radius: 2px;
+  background: var(--fill);
+}
+
+.slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--color-bg-surface);
+  border: 1.5px solid var(--fill);
+}
+
+.slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 5px rgba(20, 20, 20, 0.13);
+}
+
+/* 70% 安全线的刻度。位置 71.43% = (70-20)/(90-20)，写死在原型里 */
+.safeTick {
+  position: absolute;
+  left: calc(71.43% - 3px);
+  top: 1px;
+  width: 1px;
+  height: 9px;
+  background: var(--color-border-strong);
+  pointer-events: none;
+}

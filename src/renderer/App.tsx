@@ -1,19 +1,62 @@
-import type { JSX } from 'react'
+import { useState, type JSX } from 'react'
+import type { OutputFormat } from '../shared/types'
+import { AppHeader } from './components/AppHeader'
+import { ControlPane } from './components/ControlPane'
+import { COPY } from './lib/copy'
 
 /**
- * Task 10 的占位界面。
+ * Task 11 的验证外壳。
  *
- * 里面那个 `token-probe` 块是**有意的**：Tailwind v4 按源码里出现过的类名生成工具类，
- * 如果这些类只写在冒烟脚本的字符串里，CSS 里根本不会有它们，验证就成了空转。
- * 所以这里用真实类名渲染一遍，冒烟脚本再读计算样式确认 token 真的生效。
+ * 这里只搭了「窗口 + 标题行 + 左栏」这一段，目的是让左栏能在真实渲染环境里
+ * 被逐项比对（原型 `.window` / `.top` / `.body` / `.pane`）。
+ * 右栏、store 接线、IPC 串通都是 Task 12 / 13 的事，届时这个文件会被整体替换。
  *
- * Task 11 / 12 会把这页换成真实组件，那时探针的使命结束，冒烟脚本改成量真实元素。
+ * 里面的 `#token-probe` 块是 Task 10 留下的 token 校验探针，见那个文件的说明。
  */
 export default function App(): JSX.Element {
+  // 临时本地状态：Task 13 换成 useAppStore
+  const [shrinkPercent, setShrinkPercent] = useState(65)
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>('keep')
+
+  // 这里先塞一组假数据，好让左栏真的渲染出来供比对（空列表时左栏是隐藏的）。
+  const itemCount: number = 11
+  const totalBytes: number = Math.round(34.2 * 1024 * 1024)
+  const alphaCount: number = 1
+  const empty = itemCount === 0
+
   return (
-    <div>
-      <p>图压压</p>
-      <p>骨架已通。按 F12 在 Console 里执行 typeof window.require</p>
+    <div className="flex h-[min(768px,calc(100vh-96px))] w-[min(980px,100%)] flex-col overflow-hidden rounded-window border border-strong bg-surface shadow-[0_1px_2px_rgba(20,20,20,.03),0_20px_52px_-26px_rgba(20,20,20,.24)]">
+      <AppHeader />
+
+      <div
+        className="grid min-h-0 flex-1"
+        style={{ gridTemplateColumns: empty ? '1fr' : '328px 1fr' }}
+      >
+        {!empty && (
+          <ControlPane
+            shrinkPercent={shrinkPercent}
+            onShrinkChange={setShrinkPercent}
+            outputFormat={outputFormat}
+            onOutputFormatChange={setOutputFormat}
+            outputDir="D:\\照片\\2026-09\\processed"
+            onPickOutputDir={() => {
+              void window.pictureMore.pickOutputDir()
+            }}
+            alphaCount={alphaCount}
+            totalBytes={totalBytes}
+            itemCount={itemCount}
+            running={false}
+            progress={0}
+            finished={false}
+            onRun={() => undefined}
+          />
+        )}
+
+        <main className="flex min-h-0 flex-col px-8 py-7" aria-label="图片列表">
+          {/* 右栏是 Task 12 的事，这里先放一句占位，好让左栏的宽度与分隔线可见 */}
+          <p className="text-1 text-fg-3">{COPY.dropEmpty}</p>
+        </main>
+      </div>
 
       <div
         id="token-probe"

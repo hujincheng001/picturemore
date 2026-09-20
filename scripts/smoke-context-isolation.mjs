@@ -12,10 +12,11 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { get } from 'node:http'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 
@@ -323,12 +324,135 @@ async function main() {
     }
   }
 
-  // ---- 6. 页面确实加载了构建产物 ----
+  // ---- 6. 左栏布局是否与原型对齐 ----
+  // 原型是唯一视觉基准，但「肉眼无差异」这种标准没法自动守。
+  // 这里量的是能从原型 CSS 里逐条读出来的硬指标（尺寸、间距、字号、圆角），
+  // 它们一旦被改就会和 prototype/index.html 对不上。
+  const layoutExpr = `(() => {
+    const px = (el, p) => el ? getComputedStyle(el)[p] : null
+    const pane = document.querySelector('aside[aria-label="压缩设置"]')
+    const header = document.querySelector('header')
+    const win = document.querySelector('#root > div')
+    const value = document.querySelector('output')
+    const radio = document.querySelector('[role="radio"]')
+    const picker = document.querySelector('[aria-label="更改图片存放位置"]')
+    const cta = pane ? pane.lastElementChild.querySelector('button') : null
+    return {
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      windowWidth: px(win, 'width'),
+      windowHeight: px(win, 'height'),
+      windowRadius: px(win, 'borderRadius'),
+      headerHeight: px(header, 'height'),
+      headerPadX: px(header, 'paddingLeft'),
+      paneWidth: px(pane, 'width'),
+      panePadTop: px(pane, 'paddingTop'),
+      panePadX: px(pane, 'paddingLeft'),
+      paneGap: px(pane, 'rowGap'),
+      paneBorderRight: px(pane, 'borderRightWidth'),
+      valueFontSize: px(value, 'fontSize'),
+      valueText: value ? value.textContent : null,
+      radioHeight: px(radio, 'height'),
+      radioRadius: px(radio, 'borderRadius'),
+      // 未选中的那个格式选项（第一个是选中态，颜色本来就不同）
+      radioBorderWidth: (() => {
+        const el = document.querySelector('[role="radio"][aria-checked="false"]')
+        return el ? getComputedStyle(el).borderTopWidth : null
+      })(),
+      radioBorderColor: (() => {
+        const el = document.querySelector('[role="radio"][aria-checked="false"]')
+        return el ? getComputedStyle(el).borderTopColor : null
+      })(),
+      radioColor: (() => {
+        const el = document.querySelector('[role="radio"][aria-checked="false"]')
+        return el ? getComputedStyle(el).color : null
+      })(),
+      radioCount: document.querySelectorAll('[role="radio"]').length,
+      radioCheckedBorder: (() => {
+        const el = document.querySelector('[role="radio"][aria-checked="true"]')
+        return el ? getComputedStyle(el).borderTopColor : null
+      })(),
+      radioCheckedBg: (() => {
+        const el = document.querySelector('[role="radio"][aria-checked="true"]')
+        return el ? getComputedStyle(el).backgroundColor : null
+      })(),
+      pickerHeight: px(picker, 'height'),
+      ctaHeight: px(cta, 'height'),
+      ctaText: cta ? cta.textContent : null
+    }
+  })()`
+  const layout = await evaluate(layoutExpr)
+
+  /**
+   * 每一项都直接对应 prototype/index.html 里的一行 CSS。
+   *
+   * 窗口尺寸不写死：视口大小取决于操作系统的窗口边框与显示缩放，换台机器就变了。
+   * 断言的是原型 CSS 里那条规则本身 —— `min(980px,100%)` 与 `min(768px,calc(100vh - 96px))`，
+   * 而 body 有 32px 内边距。
+   */
+  const LAYOUT_EXPECT = {
+    windowWidth: `${Math.min(980, layout.viewportWidth - 64)}px`,
+    windowHeight: `${Math.min(768, layout.viewportHeight - 96)}px`,
+    windowRadius: '12px',
+    headerHeight: '64px',
+    headerPadX: '32px',
+    paneWidth: '328px',
+    panePadTop: '28px',
+    panePadX: '32px',
+    paneGap: '26px',
+    paneBorderRight: '1px',
+    valueFontSize: '36px',
+    valueText: '65%',
+    radioHeight: '32px',
+    radioRadius: '6px',
+    // 未选中：1px 发丝线 #D8D4CC + 三级灰字 #6B6963
+    radioBorderWidth: '1px',
+    radioBorderColor: 'rgb(216, 212, 204)',
+    radioColor: 'rgb(107, 105, 99)',
+    // 选中：边框转主字色 + 骨白底 #FBFAF8
+    radioCheckedBorder: 'rgb(20, 20, 20)',
+    radioCheckedBg: 'rgb(251, 250, 248)',
+    pickerHeight: '40px',
+    ctaHeight: '48px',
+    ctaText: '压缩这 11 张'
+  }
+
+  console.log('\n[smoke] 左栏布局检查（对照 prototype/index.html）：')
+  console.log(`  视口 ${layout.viewportWidth}x${layout.viewportHeight}`)
+  for (const [key, want] of Object.entries(LAYOUT_EXPECT)) {
+    const got = layout[key]
+    // 数字与字符串混着写，统一转成字符串比
+    const ok = String(got) === String(want)
+    if (!ok) failures.push(`左栏 ${key}：期望 ${want}，实际 ${got}`)
+    console.log(`  ${ok ? '通过' : '失败'}  ${key} = ${got}`)
+  }
+  // 四个格式选项：保持原格式 / JPG / PNG / WebP
+  const radioOk = layout.radioCount === 4
+  if (!radioOk) failures.push(`格式选项数量：期望 4，实际 ${layout.radioCount}`)
+  console.log(`  ${radioOk ? '通过' : '失败'}  radioCount = ${layout.radioCount}`)
+
+  // ---- 7. 页面确实加载了构建产物 ----
   const title = await evaluate(
     `({ title: document.title, url: location.href, hasRoot: !!document.getElementById('root') })`
   )
   console.log(`\n[smoke] 页面状态：title="${title.title}" url="${title.url}" #root=${title.hasRoot}`)
   if (!title.hasRoot) failures.push('渲染进程没有 #root 挂载点，index.html 可能没加载')
+
+  // ---- 7. 截图，供和原型并排比对 ----
+  // AGENTS.md 的标准是「肉眼能看出差异就是没做完」，硬指标（尺寸/间距/字号）覆盖不到
+  // 对齐、错位、配色这类问题。这里把应用和原型按同一个视口各截一张，
+  // 落到 tests/fixtures/_shot-*.png（下划线前缀，已在 .gitignore 里）。
+  const shotDir = resolve(ROOT, 'tests/fixtures')
+  try {
+    const shots = await captureScreenshots(cdp, target, PORT)
+    console.log('\n[smoke] 截图：')
+    for (const [name, file] of Object.entries(shots)) {
+      console.log(`  已写出  ${name} → ${file}`)
+    }
+  } catch (e) {
+    // 截图失败不算验收失败，它是给人看的辅助产物
+    console.log(`\n[smoke] 截图跳过：${e.message}`)
+  }
 
   cdp.close()
 
@@ -339,6 +463,53 @@ async function main() {
   }
   console.log('\n[smoke] 全部通过')
   return 0
+}
+
+/** 截图用的统一视口。原型和应用用同一个尺寸才谈得上并排比对 */
+const SHOT_VIEWPORT = { width: 980, height: 768 }
+
+async function shootPage(cdp, file) {
+  await cdp.send('Page.enable')
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    ...SHOT_VIEWPORT,
+    deviceScaleFactor: 1,
+    mobile: false
+  })
+  const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' })
+  writeFileSync(file, Buffer.from(data, 'base64'))
+}
+
+/**
+ * 截两张：应用当前页，以及原型页面。
+ *
+ * 原型的截图靠把同一页导航过去再截 —— Electron 的调试端点不支持
+ * `Target.createTarget`（浏览器级端点会返回 "Not supported"），
+ * 而为了截一张图去开第二个 BrowserWindow 又太侵入。反正这时候应用的检查已经跑完了。
+ */
+async function captureScreenshots(cdp, appTarget, port) {
+  const dir = resolve(ROOT, 'tests/fixtures')
+  const appShot = resolve(dir, '_shot-app.png')
+  const protoShot = resolve(dir, '_shot-prototype.png')
+
+  await shootPage(cdp, appShot)
+
+  const protoUrl = pathToFileURL(resolve(ROOT, 'prototype/index.html')).href
+  await cdp.send('Page.navigate', { url: protoUrl })
+
+  // 等原型页面加载完
+  for (let i = 0; i < 40; i++) {
+    const { result } = await cdp.send('Runtime.evaluate', {
+      expression: `document.readyState === 'complete' && document.querySelector('.window') !== null`,
+      returnByValue: true
+    })
+    if (result.value === true) break
+    await sleep(150)
+  }
+  await sleep(300)
+
+  await shootPage(cdp, protoShot)
+
+  return { '应用': appShot, '原型': protoShot }
 }
 
 let code = 1

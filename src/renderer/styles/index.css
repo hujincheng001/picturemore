@@ -1,42 +1,71 @@
 @import "./tokens.css";
 
 /* ============================================================================
-   全局重置与基础排版。
-   内容取自 prototype/index.html 的全局段，与 SPEC §8.2 Step 2 一致。
+   全局重置与基础排版。内容取自 prototype/index.html 的全局段。
+
+   ⚠️ 必须放在 @layer base 里。
+
+   Tailwind v4 把所有工具类发在 `@layer utilities`。而 CSS 的层叠规则是：
+   **无层级的规则永远压过有层级的规则，与选择器权重无关**。所以如果这里的
+   `button{background:none;border:0;color:inherit}` 不加层级地写着，它会盖掉
+   每一个 <button> 上的 bg-* / border-* / text-* 工具类。
+
+   症状很有迷惑性：同一个类名用在 <div> 上正常（`#probe-bone` 一切正常），
+   用在 <button> 上就静默失效（格式选项没有边框、没有底色、字色也不对），
+   而且不报任何错。实测记录见 docs/decisions.md 的 T11-1。
    ============================================================================ */
 
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
+@layer base {
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; }
 
-body {
-  background: var(--color-bg-app);
-  color: var(--color-fg);
-  font: 400 var(--text-2) / 1.5 var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-  display: grid;
-  place-items: center;
-  padding: 32px;
+  body {
+    background: var(--color-bg-app);
+    color: var(--color-fg);
+    font: 400 var(--text-2) / 1.5 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    display: grid;
+    place-items: center;
+    padding: 32px;
+  }
+
+  /*
+   * React 挂载点。必须是 display:contents。
+   *
+   * body 是 `display:grid; place-items:center`，而 place-items 里的 justify-items:center
+   * 会让 grid item 按内容收缩（shrink-to-fit）而不是撑满。原型里没有 #root，
+   * `.window` 直接就是 body 的 grid item，`width:min(980px,100%)` 里的 100% 解析成
+   * 整个网格区宽度（视口减 64px 内边距）。
+   *
+   * 加了 #root 之后，收缩发生在 #root 上：它的宽度变成内容的 max-content（约 478px），
+   * 窗口再取 min(980px, 100%) 就只能拿到 478px —— 窗口莫名其妙窄了一半，
+   * 而左栏因为写死了 328px 反而看起来正常，只有右栏被挤扁。
+   *
+   * display:contents 让 #root 自己不生成盒子，窗口重新成为 body 的 grid item，
+   * 结构与原型完全一致。
+   */
+  #root { display: contents; }
+
+  button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  p, ul { margin: 0; padding: 0; list-style: none; }
+
+  /* 全站唯一的焦点环。组件不要再自己写 outline */
+  :focus-visible {
+    outline: 2px solid var(--color-ink-900);
+    outline-offset: 2px;
+    border-radius: var(--radius-inline);
+  }
+
+  ::selection { background: var(--color-stone-200); }
 }
-
-button {
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-}
-
-p, ul { margin: 0; padding: 0; list-style: none; }
-
-/* 全站唯一的焦点环。组件不要再自己写 outline */
-:focus-visible {
-  outline: 2px solid var(--color-ink-900);
-  outline-offset: 2px;
-  border-radius: var(--radius-inline);
-}
-
-::selection { background: var(--color-stone-200); }
 
 /* 动效兜底：任何动效都必须在 reduce 下停掉（AGENTS.md 硬性约束） */
 @media (prefers-reduced-motion: reduce) {
