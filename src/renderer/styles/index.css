@@ -1,0 +1,47 @@
+@import "./tokens.css";
+
+/* ============================================================================
+   全局重置与基础排版。
+   内容取自 prototype/index.html 的全局段，与 SPEC §8.2 Step 2 一致。
+   ============================================================================ */
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--color-bg-app);
+  color: var(--color-fg);
+  font: 400 var(--text-2) / 1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+p, ul { margin: 0; padding: 0; list-style: none; }
+
+/* 全站唯一的焦点环。组件不要再自己写 outline */
+:focus-visible {
+  outline: 2px solid var(--color-ink-900);
+  outline-offset: 2px;
+  border-radius: var(--radius-inline);
+}
+
+::selection { background: var(--color-stone-200); }
+
+/* 动效兜底：任何动效都必须在 reduce 下停掉（AGENTS.md 硬性约束） */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

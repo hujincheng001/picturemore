@@ -537,6 +537,96 @@ SPEC §6.2 的注释写的是 nanoid，但 `AGENTS.md` 明确禁止引入 nanoid
 
 `sandbox: true` 下 preload 能拿到 `webUtils`，但**不能**用 `fs` / `path` 等 Node 模块（这是好事，等于又加了一道闸）。所以 Task 13 的编排必须全部留在主进程，preload 只做转发。这与红线三一致。
 
+---
+
+## Task 10 决策：SPEC §8.2 的 token 命名与 Tailwind 工具类撞了
+
+### T10-1：`--color-bg-surface` 生成的是 `bg-bg-surface`，不是 `bg-surface`
+
+Tailwind v4 把 `--color-X` 直接映射成 `bg-X` / `text-X` / `border-X`。而 SPEC §8.2 的语义 token 名**本身带了属性前缀**：
+
+```css
+--color-bg-app:     var(--color-bone-200);
+--color-bg-surface: #FFFFFF;
+--color-border:     var(--color-line-100);
+--color-border-strong: var(--color-line-200);
+```
+
+于是自动生成出来的类名是 `bg-bg-app` / `bg-bg-surface` / `border-border-strong`。而计划 Task 10 的 Interfaces 明确写的是要产出：
+
+> Produces: Tailwind 可用的 `bg-surface` / `text-fg-3` / `border-strong` / `rounded-control` 等类名
+
+**实测确认**（`out/renderer/assets/*.css` 里 grep 类名）：
+
+| 类名 | 是否生成 |
+|---|---|
+| `.text-fg-3` | 有 |
+| `.rounded-control` | 有 |
+| `.bg-surface` | **没有** |
+| `.border-strong` | **没有** |
+| `.bg-hover` | **没有** |
+
+`.text-fg-3` 能过是因为 `--color-fg-3` 没带 `text-` 前缀，恰好不撞。所以这个坑是**部分生效**的 —— 一半类名能用一半不能用，比全不能用更难发现。
+
+**处置：不改 SPEC 的 token 名，补一层显式的 `@utility` 别名。**
+
+```css
+@utility bg-app     { background-color: var(--color-bg-app); }
+@utility bg-surface { background-color: var(--color-bg-surface); }
+@utility bg-subtle  { background-color: var(--color-bg-subtle); }
+@utility bg-hover   { background-color: var(--color-bg-hover); }
+@utility border-line   { border-color: var(--color-border); }
+@utility border-strong { border-color: var(--color-border-strong); }
+```
+
+理由：SPEC §8.2 的 token 名是设计系统本身，原型也用同一套名字（`--bg-surface` / `--border-strong`），改名字会让三处文档对不上。而计划要的类名是**消费侧**的写法。用别名把两边接上，两个诉求同时满足，改动只在一处。以后加语义色，别名也加在这里。
+
+### T10-2：token 校验做成了可复跑的检查，不靠肉眼
+
+计划 Step 4 是「在 App.tsx 里写个测试 div，肉眼看」。肉眼看不出 `bg-surface` 到底有没有生效（上面那个坑就是这么漏过去的），所以改成程序化验证。
+
+`App.tsx` 里保留一个视觉上移出屏幕的 `#token-probe` 块，用**真实类名**渲染。这一点是必须的：Tailwind 按源码里出现过的类名生成工具类，如果类名只写在冒烟脚本的字符串里，CSS 里根本不会有它们，验证就成了空转。
+
+冒烟脚本读 6 个探针元素的 13 项计算样式：
+
+```
+[smoke] 设计 token 检查：
+  通过  bone.backgroundColor = rgb(239, 237, 232)     ← #EFEDE8
+  通过  bone.color = rgb(107, 105, 99)                ← #6B6963
+  通过  bone.borderRadius = 6px
+  通过  surface.backgroundColor = rgb(255, 255, 255)
+  通过  surface.color = rgb(20, 20, 20)
+  通过  surface.borderRadius = 12px
+  通过  caution.color = rgb(138, 91, 0)               ← #8A5B00
+  通过  caution.borderRadius = 4px
+  通过  type.fontSize = 36px
+  通过  strong.borderTopColor = rgb(216, 212, 204)    ← #D8D4CC
+  通过  strong.borderTopWidth = 1px
+  通过  hover.backgroundColor = rgb(233, 230, 224)
+  通过  hover.color = rgb(58, 56, 53)
+```
+
+**只断言 CSS 变量有没有定义是不够的**：变量定义了但 Tailwind 没生成工具类，类名挂在元素上一样没有任何效果。必须量计算样式。
+
+### T10-3：component 层放在 `@theme` 外面
+
+`--cta-bg` / `--track` / `--fill` 这些 component token 写在 `:root` 而不是 `@theme` 里。放在 `@theme` 里会生成 `bg-cta-bg` 这类工具类，组件就会绕开语义层直接写 `bg-cta-bg`，三层结构白设了。
+
+### T10-4：`tokens.css` 补了 SPEC §8.2 漏掉的三个 token
+
+原型里有、SPEC §8.2 的 `@theme` 块漏掉的：
+
+| token | 用途 |
+|---|---|
+| `--color-bg-subtle` | 次级底色（`--stone-100`） |
+| `--color-bg-hover` | 悬停底色（`--stone-200`） |
+| `--ease-out-expo` | 全站统一缓动 `cubic-bezier(.16,1,.3,1)` |
+
+缺了它们，组件里遇到悬停态就没有 token 可用，只能写字面量 —— 那正是设计系统要避免的事。按 AGENTS.md「视觉以原型为准」，原型有就补上。
+
+SPEC §8.2 原有的每一行都保持逐字不变。
+
+
 
 
 

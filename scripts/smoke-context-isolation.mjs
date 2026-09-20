@@ -271,7 +271,59 @@ async function main() {
     console.log(`  失败  ${settings.message}`)
   }
 
-  // ---- 5. 页面确实加载了构建产物 ----
+  // ---- 5. 设计 token 是否真的落到了计算样式上 ----
+  // 量的是 App.tsx 里 #token-probe 那几个元素的真实计算值。
+  // 只检查 CSS 变量有没有定义是不够的：变量定义了但 Tailwind 没生成工具类，
+  // 类名挂在元素上一样没有任何效果。
+  const tokenExpr = `(() => {
+    const read = (id, props) => {
+      const el = document.getElementById(id)
+      if (!el) return null
+      const cs = getComputedStyle(el)
+      const out = {}
+      for (const p of props) out[p] = cs[p]
+      return out
+    }
+    return {
+      bone: read('probe-bone', ['backgroundColor', 'color', 'borderRadius']),
+      surface: read('probe-surface', ['backgroundColor', 'color', 'borderRadius']),
+      caution: read('probe-caution', ['color', 'borderRadius']),
+      type: read('probe-type', ['fontSize', 'fontFamily']),
+      strong: read('probe-strong', ['borderTopColor', 'borderTopWidth']),
+      hover: read('probe-hover', ['backgroundColor', 'color'])
+    }
+  })()`
+  const tokens = await evaluate(tokenExpr)
+
+  /** 期望的计算值。色值写成 rgb() 形式，那是 getComputedStyle 的返回格式 */
+  const TOKEN_EXPECT = {
+    bone: { backgroundColor: 'rgb(239, 237, 232)', color: 'rgb(107, 105, 99)', borderRadius: '6px' },
+    surface: { backgroundColor: 'rgb(255, 255, 255)', color: 'rgb(20, 20, 20)', borderRadius: '12px' },
+    caution: { color: 'rgb(138, 91, 0)', borderRadius: '4px' },
+    type: { fontSize: '36px' },
+    strong: { borderTopColor: 'rgb(216, 212, 204)', borderTopWidth: '1px' },
+    hover: { backgroundColor: 'rgb(233, 230, 224)', color: 'rgb(58, 56, 53)' }
+  }
+
+  console.log('\n[smoke] 设计 token 检查：')
+  for (const [key, want] of Object.entries(TOKEN_EXPECT)) {
+    const got = tokens[key]
+    if (got === null) {
+      failures.push(`#probe-${key} 不存在，App.tsx 的 token 探针被删了？`)
+      console.log(`  失败  #probe-${key} 不存在`)
+      continue
+    }
+    for (const [prop, expected] of Object.entries(want)) {
+      let actual = got[prop]
+      // fontFamily 是候选列表，只要求首选字族在里面
+      if (prop === 'fontFamily') actual = actual.split(',')[0].replace(/["']/g, '').trim()
+      const ok = prop === 'fontFamily' ? actual === 'Cascadia Mono' : actual === expected
+      if (!ok) failures.push(`#probe-${key} 的 ${prop}：期望 ${expected}，实际 ${actual}`)
+      console.log(`  ${ok ? '通过' : '失败'}  ${key}.${prop} = ${actual}`)
+    }
+  }
+
+  // ---- 6. 页面确实加载了构建产物 ----
   const title = await evaluate(
     `({ title: document.title, url: location.href, hasRoot: !!document.getElementById('root') })`
   )
