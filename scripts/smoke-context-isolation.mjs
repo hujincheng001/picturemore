@@ -378,7 +378,47 @@ async function main() {
       })(),
       pickerHeight: px(picker, 'height'),
       ctaHeight: px(cta, 'height'),
-      ctaText: cta ? cta.textContent : null
+      ctaText: cta ? cta.textContent : null,
+
+      /* ---------- 右栏 ---------- */
+      listPanePadTop: px(document.querySelector('main[aria-label="图片列表"]'), 'paddingTop'),
+      listPanePadX: px(document.querySelector('main[aria-label="图片列表"]'), 'paddingLeft'),
+      dropHeight: (() => {
+        const el = document.querySelector('main[aria-label="图片列表"] > div')
+        return el ? getComputedStyle(el).height : null
+      })(),
+      dropBorderStyle: (() => {
+        const el = document.querySelector('main[aria-label="图片列表"] > div')
+        return el ? getComputedStyle(el).borderTopStyle : null
+      })(),
+      dropBorderRadius: (() => {
+        const el = document.querySelector('main[aria-label="图片列表"] > div')
+        return el ? getComputedStyle(el).borderTopLeftRadius : null
+      })(),
+      dropText: (() => {
+        const el = document.querySelector('main[aria-label="图片列表"] > div')
+        return el ? el.textContent : null
+      })(),
+      metaText: (() => {
+        const el = document.querySelectorAll('main[aria-label="图片列表"] > div')[1]
+        return el ? el.firstElementChild.textContent : null
+      })(),
+      metaPadBottom: (() => {
+        const el = document.querySelectorAll('main[aria-label="图片列表"] > div')[1]
+        return el ? getComputedStyle(el).paddingBottom : null
+      })(),
+      fileHeight: px(document.querySelector('main li'), 'height'),
+      fileCount: document.querySelectorAll('main li').length,
+      fileFirstName: (() => {
+        const el = document.querySelector('main li')
+        return el ? el.firstElementChild.textContent : null
+      })(),
+      // 移除按钮平时是隐形的，悬停或聚焦才出现（原型 .file:hover .rm）
+      removeOpacity: px(document.querySelector('main li button'), 'opacity'),
+      removeText: (() => {
+        const el = document.querySelector('main li button')
+        return el ? el.textContent : null
+      })()
     }
   })()`
   const layout = await evaluate(layoutExpr)
@@ -414,7 +454,23 @@ async function main() {
     radioCheckedBg: 'rgb(251, 250, 248)',
     pickerHeight: '40px',
     ctaHeight: '48px',
-    ctaText: '压缩这 11 张'
+    ctaText: '压缩这 11 张',
+
+    /* ---------- 右栏（原型 .list-pane / .drop / .meta / .file）---------- */
+    listPanePadTop: '28px',
+    listPanePadX: '32px',
+    dropHeight: '52px',
+    dropBorderStyle: 'dashed',
+    dropBorderRadius: '6px',
+    dropText: '拖入更多图片，或选择文件',
+    // 共 11 张 · 34.2 MB —— 中黑点每行最多一个
+    metaText: '共 11 张 · 34.2 MB',
+    metaPadBottom: '9px',
+    fileHeight: '44px',
+    fileCount: 11,
+    fileFirstName: 'IMG_2043.HEIC',
+    removeOpacity: '0',
+    removeText: '移除'
   }
 
   console.log('\n[smoke] 左栏布局检查（对照 prototype/index.html）：')
@@ -431,27 +487,94 @@ async function main() {
   if (!radioOk) failures.push(`格式选项数量：期望 4，实际 ${layout.radioCount}`)
   console.log(`  ${radioOk ? '通过' : '失败'}  radioCount = ${layout.radioCount}`)
 
-  // ---- 7. 页面确实加载了构建产物 ----
+  // ---- 7. 截图：应用的有图状态 ----
+  // 顺序有讲究：原型截图靠把这一页导航过去，导航之后就跑不了任何针对应用的检查了。
+  // 所以「应用有图 → 空态检查 → 应用空态 → 原型」这个次序不能动。
+  //
+  // AGENTS.md 的标准是「肉眼能看出差异就是没做完」，硬指标（尺寸/间距/字号）覆盖不到
+  // 对齐、错位、配色这类问题。落到 tests/fixtures/_shot-*.png（下划线前缀，已在 .gitignore 里）。
+  const SHOT_DIR = resolve(ROOT, 'tests/fixtures')
+  const appFullShot = resolve(SHOT_DIR, '_shot-app.png')
+  try {
+    await shootPage(cdp, appFullShot)
+    console.log(`\n[smoke] 截图：应用（有图） → ${appFullShot}`)
+  } catch (e) {
+    // 截图失败不算验收失败，它是给人看的辅助产物
+    console.log(`\n[smoke] 截图跳过：${e.message}`)
+  }
+
+  // ---- 8. 空态（DESIGN.md §4 / SPEC §8.4「拖拽区（空）」）----
+  // 点一下「清空列表」，验证空态真的切过去了：左栏整体隐藏、拖拽区吃掉整个右栏、
+  // 文案换成空态那句、格式说明露出来、右栏内边距从 28/32 变成 32。
+  const emptyState = await evaluate(`(async () => {
+    const clear = [...document.querySelectorAll('button')].find((b) => b.textContent === '清空列表')
+    if (!clear) return { ok: false, why: '找不到清空按钮' }
+    clear.click()
+    await new Promise((r) => setTimeout(r, 150))
+
+    const pane = document.querySelector('aside[aria-label="压缩设置"]')
+    const main = document.querySelector('main[aria-label="图片列表"]')
+    const drop = main ? main.firstElementChild : null
+    const cs = drop ? getComputedStyle(drop) : null
+    return {
+      ok: true,
+      paneGone: pane === null,
+      dropText: drop ? drop.textContent : null,
+      dropFlexDir: cs ? cs.flexDirection : null,
+      dropFlexGrow: cs ? cs.flexGrow : null,
+      dropFontSize: cs ? cs.fontSize : null,
+      mainPadding: main ? getComputedStyle(main).padding : null,
+      fileCount: document.querySelectorAll('main li').length,
+      metaGone: main ? main.children.length === 1 : false
+    }
+  })()`)
+
+  console.log('\n[smoke] 空态检查：')
+  const EMPTY_EXPECT = {
+    paneGone: true,
+    dropText: '把图片拖到这里选择文件HEIC、JPG、PNG、WebP。一张也行，几十张也行',
+    dropFlexDir: 'column',
+    dropFlexGrow: '1',
+    dropFontSize: '20px',
+    mainPadding: '32px',
+    fileCount: 0,
+    metaGone: true
+  }
+  if (!emptyState.ok) {
+    failures.push(`空态检查无法进行：${emptyState.why}`)
+    console.log(`  失败  ${emptyState.why}`)
+  } else {
+    for (const [key, want] of Object.entries(EMPTY_EXPECT)) {
+      const got = emptyState[key]
+      const ok = String(got) === String(want)
+      if (!ok) failures.push(`空态 ${key}：期望 ${want}，实际 ${got}`)
+      console.log(`  ${ok ? '通过' : '失败'}  ${key} = ${got}`)
+    }
+  }
+
+  // ---- 9. 页面确实加载了构建产物 ----
   const title = await evaluate(
     `({ title: document.title, url: location.href, hasRoot: !!document.getElementById('root') })`
   )
   console.log(`\n[smoke] 页面状态：title="${title.title}" url="${title.url}" #root=${title.hasRoot}`)
   if (!title.hasRoot) failures.push('渲染进程没有 #root 挂载点，index.html 可能没加载')
 
-  // ---- 7. 截图，供和原型并排比对 ----
-  // AGENTS.md 的标准是「肉眼能看出差异就是没做完」，硬指标（尺寸/间距/字号）覆盖不到
-  // 对齐、错位、配色这类问题。这里把应用和原型按同一个视口各截一张，
-  // 落到 tests/fixtures/_shot-*.png（下划线前缀，已在 .gitignore 里）。
-  const shotDir = resolve(ROOT, 'tests/fixtures')
+  // 顺手把刚才那个空态也留一张，和原型的「空列表」预览比对
   try {
-    const shots = await captureScreenshots(cdp, target, PORT)
-    console.log('\n[smoke] 截图：')
-    for (const [name, file] of Object.entries(shots)) {
-      console.log(`  已写出  ${name} → ${file}`)
-    }
+    const emptyShot = resolve(SHOT_DIR, '_shot-app-empty.png')
+    await shootPage(cdp, emptyShot)
+    console.log(`[smoke] 截图：应用（空态） → ${emptyShot}`)
+  } catch {
+    // 同前，辅助产物失败不算验收失败
+  }
+
+  // ---- 10. 原型截图 ----
+  // 放在最后：导航过去之后这一页就是原型了，应用那边再也测不了。
+  try {
+    const protoShot = await shootPrototype(cdp)
+    console.log(`[smoke] 截图：原型 → ${protoShot}`)
   } catch (e) {
-    // 截图失败不算验收失败，它是给人看的辅助产物
-    console.log(`\n[smoke] 截图跳过：${e.message}`)
+    console.log(`[smoke] 原型截图跳过：${e.message}`)
   }
 
   cdp.close()
@@ -480,20 +603,15 @@ async function shootPage(cdp, file) {
 }
 
 /**
- * 截两张：应用当前页，以及原型页面。
+ * 截原型页面。**必须在所有针对应用的检查跑完之后调用** —— 它把这一页导航走了。
  *
- * 原型的截图靠把同一页导航过去再截 —— Electron 的调试端点不支持
- * `Target.createTarget`（浏览器级端点会返回 "Not supported"），
- * 而为了截一张图去开第二个 BrowserWindow 又太侵入。反正这时候应用的检查已经跑完了。
+ * 为什么用导航而不是开新 target：Electron 的调试端点不支持 `Target.createTarget`
+ * （浏览器级端点会返回 "Not supported"），为了截一张图去开第二个 BrowserWindow 又太侵入。
  */
-async function captureScreenshots(cdp, appTarget, port) {
-  const dir = resolve(ROOT, 'tests/fixtures')
-  const appShot = resolve(dir, '_shot-app.png')
-  const protoShot = resolve(dir, '_shot-prototype.png')
-
-  await shootPage(cdp, appShot)
-
+async function shootPrototype(cdp) {
+  const protoShot = resolve(ROOT, 'tests/fixtures/_shot-prototype.png')
   const protoUrl = pathToFileURL(resolve(ROOT, 'prototype/index.html')).href
+
   await cdp.send('Page.navigate', { url: protoUrl })
 
   // 等原型页面加载完
@@ -509,7 +627,19 @@ async function captureScreenshots(cdp, appTarget, port) {
 
   await shootPage(cdp, protoShot)
 
-  return { '应用': appShot, '原型': protoShot }
+  // 再切到原型的「空列表」预览截一张，和应用的空态对照
+  try {
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.getElementById('pvEmpty').click()`
+    })
+    await sleep(250)
+    const protoEmpty = resolve(ROOT, 'tests/fixtures/_shot-prototype-empty.png')
+    await shootPage(cdp, protoEmpty)
+  } catch {
+    // 原型结构变了也不该让冒烟红，这只是辅助产物
+  }
+
+  return protoShot
 }
 
 let code = 1

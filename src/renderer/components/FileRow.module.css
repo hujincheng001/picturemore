@@ -1,0 +1,79 @@
+/**
+ * 列表行。与 prototype/index.html 的 `.file` 一一对应。
+ *
+ * 用 CSS Module 而不是工具类的原因：
+ * - `pop` 关键帧动画（结果体积落位时的淡入）
+ * - `.file:hover .rm` / `.file:focus-within .rm` 这种父对子的联动
+ * - 逐行与原型 CSS 对得上，便于比对
+ */
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  border-bottom: 1px solid var(--color-border);
+  transition: opacity 0.22s ease;
+}
+
+.file:last-child {
+  border-bottom: 0;
+}
+
+.busy {
+  opacity: 0.3;
+}
+
+.fname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-fg-2);
+}
+
+.fsize {
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg-3);
+  white-space: nowrap;
+}
+
+.arw {
+  padding: 0 5px;
+}
+
+.out {
+  color: var(--color-fg);
+}
+
+.outPop {
+  animation: pop 320ms ease-out both;
+}
+
+@keyframes pop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.rm {
+  flex: none;
+  font-size: var(--text-1);
+  color: var(--color-fg-3);
+  opacity: 0;
+  padding: 2px 4px;
+  border-radius: var(--radius-inline);
+  transition: opacity 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+}
+
+.file:hover .rm,
+.file:focus-within .rm {
+  opacity: 1;
+}
+
+.rm:hover {
+  color: var(--color-fg);
+  background: var(--color-bg-hover);
+}

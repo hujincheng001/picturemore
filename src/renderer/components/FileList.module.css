@@ -1,0 +1,30 @@
+/**
+ * 右栏的滚动区。与 prototype/index.html 的 `.files` 对应。
+ *
+ * 滚动条按原型调过：细条、滑块用发丝线色、轨道透明。
+ * 标准属性（scrollbar-width / scrollbar-color）在 Electron 的 Chromium 上够用，
+ * 但原型还给滑块加了 2px 的底色描边让它在白底上不贴边，这一条只有
+ * ::-webkit-scrollbar-thumb 能表达，所以两种都留着。
+ */
+
+.files {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.files::-webkit-scrollbar {
+  width: 8px;
+}
+
+.files::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+  border: 2px solid var(--color-bg-surface);
+}
+
+.files::-webkit-scrollbar-track {
+  background: transparent;
+}
