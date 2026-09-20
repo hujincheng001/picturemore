@@ -1049,6 +1049,71 @@ rmSync(APP_SETTINGS, { force: true })
 
 **这条经验值得推广**：验收脚本的第一步应该是「把状态复位到已知起点」，而不是「假设环境是干净的」。凡是跨越了上一次运行的断言，迟早会在某个时刻莫名其妙地红一次，然后被人当成 flaky 忽略掉 —— 那比没有测试更糟。
 
+---
+
+## 收尾三：测试覆盖的窟窿，以及它的根因
+
+### T15-1：一半的模块一条测试都没有，根因是它们都 import electron
+
+盘点下来发现：`src/main/image/` 有 100 多条测试，但后面写的这些模块**一条都没有**：
+
+| 模块 | 里面的逻辑 | 错了会怎样 |
+|---|---|---|
+| `src/main/ipc/files.ts` | 文件夹展开一层、非图片静默过滤 | 列表多一行少一行，不报错 |
+| `src/main/ipc/task.ts` | 超时按像素数缩放 | 大图被判失败，或卡死不被兜住 |
+| `src/main/settings.ts` | 磁盘值的校验与夹取 | 手改过的设置文件让应用起不来 |
+| `src/renderer/lib/format.ts` | MB/KB 分界、体积格式化 | 界面上每个数字的样子 |
+| `src/renderer/lib/path.ts` | Windows `\` 与 POSIX `/` 都要认 | 文件存到奇怪的地方 |
+| `src/shared/reasons.ts` | 异常码到原因码的映射 | 用户看到错误的原因 |
+
+**根因**：这些模块都在文件顶部 `import ... from 'electron'`，在 node 环境下根本 import 不进来，于是「没法测」变成了「没测」。
+
+`SPEC.md` §4 其实写过这条原则 ——「`src/main/image/` 必须是纯函数模块，不依赖 Electron API，可脱离 Electron 单测」—— 只是当时只把它当成图像引擎的约定，没意识到它是一条**通用**的分层规则。
+
+### T15-2：把纯逻辑从 electron 依赖里分出来
+
+按「逻辑本体 / IPC 注册」拆开，和 `src/main/image/` 遵循同一条原则：
+
+| 新文件（不依赖 electron） | 原位置 | 留下的部分 |
+|---|---|---|
+| `src/main/files.ts` | `src/main/ipc/files.ts` | 只留 `ipcMain.handle` 转发 |
+| `src/main/timeout.ts` | `src/main/ipc/task.ts` | 只留调用 |
+| `src/renderer/lib/path.ts` | `src/renderer/store/useAppStore.ts` | 只留 store |
+
+`settings.ts` 没拆 —— 它整体就是「读盘/写盘」，逻辑和 IO 分不开。它的测试用 `vi.mock('electron')` 把 `app.getPath` 指到临时目录：
+
+```ts
+const state = vi.hoisted(() => ({ userData: '' }))
+vi.mock('electron', () => ({ app: { getPath: () => state.userData } }))
+```
+
+**注意 `vi.hoisted`**：`vi.mock` 会被提升到 import 之上，普通模块级变量在工厂执行时还没初始化，只有 `vi.hoisted` 的返回值能一起提上去。
+
+### T15-3：新增 78 条测试
+
+| 文件 | 条数 | 覆盖的是 |
+|---|---|---|
+| `files.spec.ts` | 24 | 展开一层不递归、非图片静默过滤、空文件/假图片/目录/不存在各自的错误码、一张失败不影响其余 |
+| `settings.spec.ts` | 14 | 畸形 JSON 回退、缩小比例夹到 20-90、非法格式回退、空串路径转 null、多余字段丢弃 |
+| `format.spec.ts` | 11 | MB/KB 分界（`>= 1MB` 还是 `>`）、0 与 NaN 不产出 `NaN KB`、65% 对应原型里的 64.29% 填充 |
+| `path.spec.ts` | 10 | 两种分隔符、混用取最后一个、根分隔符不产出空串、输出分隔符跟着输入走 |
+| `timeout.spec.ts` | 9 | 30s 下限、3s/百万像素、iPhone 24MP 落在 60-80s、超时错误带 code、工作抛错不被超时掩盖 |
+| `reasons.spec.ts` | 6 | 各错误码归类、非 Error 输入不炸 |
+| `reason.spec.ts` | 4 | SPEC 给了的两条原样对上，**SPEC 没给的必须保持为空** |
+
+最后一条值得单说：`reason.spec.ts` 同时守两件事 —— 已确认的文案必须对，未确认的必须**保持为空**。这样哪天有人顺手编一句填进去，测试会红。把「不猜」这条规矩变成了可执行的断言。
+
+**合计**：从 130 条涨到 208 条。
+
+### T15-4：几条断言背后的取舍
+
+**「展开一层不递归」** 单独一条用例守着。SPEC §9 明写「展开一层」，但递归看起来更「完善」—— 用户拖进来一个盘符根目录时，递归会变成扫描整块盘。这种「看起来更好但违反规格」的改动最容易被顺手做掉。
+
+**「0 与 NaN 回退成 0 KB」** —— 读不了的图片 `bytes` 是 0，界面不能显示 `NaN KB`。
+
+**「根分隔符不产出空串」** —— `dirOf('/a.jpg')` 如果返回空串，拼出来就是 `/processed` 这种怪路径。`i > 0` 这个边界条件是随手写最容易写错的地方。
+
+
 
 
 

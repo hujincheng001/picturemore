@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { OutputFormat, StartTaskPayload, TaskDoneEvent, TaskProgressEvent } from '../../shared/types'
+import { defaultOutputDir } from '../lib/path'
 import type { ImageItem } from '../lib/types'
 
 /**
@@ -9,22 +10,11 @@ import type { ImageItem } from '../lib/types'
  * 1. **滑块拖动不发 IPC。** 预估量在前端算（`totalBytes x (1 - p/100)`）。
  * 2. `task:progress` 按 itemId 定点更新单行，不整表重渲。
  * 3. 空列表时左栏整体隐藏（渲染层的事，见 App.tsx）。
+ *
+ * 路径处理在 `lib/path.ts`（可单测）。
  */
 
 const DEFAULT_SHRINK = 65
-
-/** 取父目录。渲染进程拿不到 node:path，用字符串处理，两种分隔符都要认 */
-function dirOf(p: string): string {
-  const i = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'))
-  return i > 0 ? p.slice(0, i) : p
-}
-
-/** `<第一张图所在目录>/processed`（SPEC §4.6 的默认输出目录） */
-function defaultOutputDir(firstPath: string): string {
-  const dir = dirOf(firstPath)
-  const sep = dir.includes('\\') ? '\\' : '/'
-  return dir.endsWith(sep) ? `${dir}processed` : `${dir}${sep}processed`
-}
 
 /** 去掉路径里的非法字符，给 taskId 用 */
 function newTaskId(): string {

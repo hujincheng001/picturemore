@@ -8,12 +8,15 @@ import type { StartTaskPayload, TaskDoneEvent, TaskProgressEvent } from '../../s
 import { CANCELLED, Pool, defaultConcurrency } from '../queue'
 import { EXT, compressOne, probe, resolveOutputPath, targetFormat } from '../image'
 import { writeSettings } from '../settings'
+import { timeoutFor, withTimeout } from '../timeout'
 
 /**
  * 批量压缩的编排。全部留在主进程（红线三：渲染进程不碰文件系统）。
  *
  * 单张的流程：读文件 → probe → compressOne → 定输出名 → 写盘 → 推一行进度。
  * 每张完成立刻推，不等整批（SPEC §4.8）；单张失败不中断整批，标记该张后继续。
+ *
+ * 超时策略在 `src/main/timeout.ts`（不依赖 electron，可单测）。
  */
 
 interface ActiveTask {
@@ -21,42 +24,6 @@ interface ActiveTask {
 }
 
 const active = new Map<string, ActiveTask>()
-
-/**
- * 单张的超时上限。
- *
- * SPEC §9 写的是「单张处理超时（>30s）→ 标记 failed」。但 Task 7 实测下来 30s 是不够的：
- * 一张 48MP 的图在 p=20 时要跑 104s（底线命中目标，二分跑满 5 到 6 次，每次约 23s），
- * 24MP 的 iPhone HEIC 在 p=20 时是 12s。按固定的 30s 会把本来能跑完的大图判死。
- *
- * 所以改成按像素数缩放，并保留 30s 作为下限：`max(30s, 3s x 百万像素)`。
- * 24MP → 72s，48MP → 144s。它的作用是兜住真正的卡死，不是卡正常的大图。
- *
- * 已知取舍：底层的编码没法中断，超时只是"不再等它"，那张仍可能在后台跑完并落盘。
- * 因为阈值给得宽，正常情况不会触发。见 docs/decisions.md 的 T13-1。
- */
-const MIN_TIMEOUT_MS = 30_000
-const MS_PER_MEGAPIXEL = 3_000
-
-export function timeoutFor(width: number, height: number): number {
-  const megapixels = Math.max(1, (width * height) / 1_000_000)
-  return Math.max(MIN_TIMEOUT_MS, Math.round(megapixels * MS_PER_MEGAPIXEL))
-}
-
-/** 给一段异步工作加超时。超时抛的错带 `code: 'TIMEOUT'`，交给 reasonFromError 归类 */
-function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      const err = new Error(`单张处理超过 ${ms}ms`) as Error & { code: string }
-      err.code = 'TIMEOUT'
-      reject(err)
-    }, ms)
-  })
-  return Promise.race([work, timeout]).finally(() => {
-    if (timer !== undefined) clearTimeout(timer)
-  })
-}
 
 function sendProgress(sender: WebContents, payload: TaskProgressEvent): void {
   // 窗口可能在批次跑完之前就被关了
