@@ -6,6 +6,7 @@
  */
 
 export * from './types'
+export { configureImageRuntime } from './runtime'
 export { probe } from './probe'
 export { compressOne, targetFormat, EXT } from './compress'
 export type { CompressInput, CompressOutput } from './compress'

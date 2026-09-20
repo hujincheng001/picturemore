@@ -432,5 +432,50 @@ SPEC §4.3 写的是「颜色数 <= 256 → 量化到调色板」，按 SPEC 实
 
 **本次不做**，理由是它超出计划范围，且 iPhone 是 HEIC 的主要来源。记录在此，等用户拍板。
 
+---
+
+## Task 8 决策：并发池的两个坑
+
+### T8-1：`cancelled` 不能是粘性标志位
+
+计划草稿的 `cancelPending` 是这么写的：
+
+```ts
+cancelPending(): void {
+  this.cancelled = true          // ← 问题在这
+  const w = this.waiting
+  this.waiting = []
+  w.forEach((resolve) => resolve())
+}
+```
+
+`cancelled` 一旦置 `true` 就再也不会变回来，**之后所有 `run()` 都会被拒**。但 SPEC §9 明确要求池子可以复用：
+
+> 处理中清空列表 | 先 `task:cancel` 再清
+> 用户在处理中改滑块 | 滑块只影响下一次运行，不打断当前批次
+
+用户清空列表之后再拖一批图进来，是常规操作。粘性标志位会让第二批图全部以 CANCELLED 拒绝，而且没有任何报错提示，表现为"点了压缩但什么都没发生"。
+
+改成**只清空等待队列、不设标志位**，并直接 reject 而不是 resolve 之后再检查标志。
+
+### T8-2：取消必须用 reject，调用方必须用 `allSettled`
+
+`cancelPending` 是**同步**拒绝排队中的 promise。如果调用方跨了宏任务才挂处理器，Node 会报 unhandled rejection（测试第一版就是这么炸的，3 条）。
+
+这不是测试噪音，是真实约束：Electron 里未处理的 rejection 会刷警告，配置不当还可能中断。**批量场景必须用 `Promise.allSettled`**，它在同一个 tick 里就给所有 promise 挂上处理器。这条已经写进 `queue.ts` 的注释和测试用例里。
+
+### T8-3：槽位转交而不是"先减再加"
+
+`release()` 如果有等待者，直接把槽位转交给它（`active` 不变），而不是 `active--` 之后再 `acquire()`。后者会在两个微任务之间出现空窗，让"并发不超过上限"变成不可靠的断言。
+
+对应地，测试里除了断言 `peak <= 3`，还必须断言 `peak === 3` —— 只断言上限的话，一个纯串行的实现也能通过。
+
+### T8-4：`sharp.cache(false)` 落在 `image/runtime.ts`
+
+SPEC §14 的 OOM 处置要求在启动时关掉 sharp 内部缓存。放在 `src/main/image/runtime.ts` 的 `configureImageRuntime()`，由 `src/main/index.ts` 在处理任何一张图之前调用一次。
+
+**刻意没有动 `sharp.concurrency()`。** 并发池负责并行度，libvips 自己的线程数怎么配需要实测再定（N 个并发操作 × 每操作 N 个线程有超订风险，但影响多大没测过）。不凭感觉设，留作后续实测项。
+
+
 
 
