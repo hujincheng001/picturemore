@@ -1,0 +1,56 @@
+# electron-builder 配置。要点照抄 SPEC §11。
+#
+# 体积预算：Electron 运行时约 80MB + sharp 约 30MB + libheif-js WASM 约 2MB
+# + 前端产物约 1MB 约等于 113MB，上限 120MB。
+#
+# 最容易漏的两条：
+#   1. asarUnpack 里必须有 sharp 与 @img/**（原生模块不能进 asar）
+#   2. files 里必须排除 .workbuddy-ai/**（9.3MB 技能目录）
+
+appId: com.picturemore.app
+productName: 图压压
+copyright: pictureMore
+
+directories:
+  output: release
+  buildResources: build
+
+# 白名单式打包：只放运行时要的东西。
+# 源码、文档、测试图片（60MB）、原型、技能目录一个都不进包。
+files:
+  - "out/**"
+  - "package.json"
+  - "!**/*.map"
+  - "!**/*.ts"
+  - "!**/.workbuddy-ai/**"
+  - "!**/.workbuddy/**"
+  - "!**/prototype/**"
+  - "!**/tests/**"
+  - "!**/scripts/**"
+  - "!**/docs/**"
+  - "!**/build/**"
+
+# 原生模块必须解包，asar 里的 .node 加载不了
+asarUnpack:
+  - "**/node_modules/sharp/**"
+  - "**/node_modules/@img/**"
+
+# sharp 走 N-API，预编译二进制在 Node 与 Electron 之间 ABI 兼容，不需要重编。
+# 打开 npmRebuild 反而会要求本机有完整编译工具链。
+npmRebuild: false
+
+win:
+  target:
+    - nsis
+  artifactName: "${productName}-${version}-setup.${ext}"
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: 图压压
+  # 卸载时保留用户设置（存放位置、缩小比例），重装后不用重选
+  deleteAppDataOnUninstall: false
