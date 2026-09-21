@@ -79,7 +79,6 @@ const API_METHODS = [
   'probe',
   'pickImages',
   'pickOutputDir',
-  'revealInFolder',
   'start',
   'cancel',
   'getSettings',

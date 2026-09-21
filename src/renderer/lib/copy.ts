@@ -68,6 +68,19 @@ export const COPY = {
    * 这条是用户 2026-09-21 决定加单批 100 张上限时新增的文案，已同步进 SPEC §8.4。
    */
   listDropped: (n: number): string => `（已忽略 ${n} 张）`,
+
+  /**
+   * 批次级错误。放在底部那行 —— 它本来就在「常驻声明」与「完成提示」之间切换，
+   * 加第三个状态不需要新增版式。
+   *
+   * 用户 2026-09-21 确认。原来 DESIGN.md §5.6 的 CTA 状态矩阵只有
+   * 「默认 / 悬停 / 激活 / 禁用」，SPEC §8.4 也没有对应字符串 ——
+   * 结果是输出目录写不进去时**点了没反应**。见 docs/decisions.md 的 T20-3。
+   */
+  errorWriteFailed: '这个文件夹写不进去，换一个试试',
+  errorDiskFull: '磁盘满了，后面的图没有处理',
+  errorFallback: '这批没有跑完',
+
   clearList: '清空列表',
   remove: '移除',
   removeAria: (name: string): string => `移除 ${name}`,

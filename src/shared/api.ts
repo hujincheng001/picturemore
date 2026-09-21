@@ -2,6 +2,7 @@ import type {
   ProbeResponse,
   Settings,
   StartTaskPayload,
+  TaskStartResult,
   TaskDoneEvent,
   TaskProgressEvent
 } from './types'
@@ -22,9 +23,8 @@ export interface PictureMoreApi {
   probe(paths: string[], limit?: number): Promise<ProbeResponse>
   pickImages(): Promise<{ paths: string[] } | null>
   pickOutputDir(): Promise<{ dir: string } | null>
-  revealInFolder(path: string): Promise<void>
 
-  start(payload: StartTaskPayload): Promise<{ taskId: string }>
+  start(payload: StartTaskPayload): Promise<TaskStartResult>
   cancel(taskId: string): Promise<void>
 
   getSettings(): Promise<Settings>

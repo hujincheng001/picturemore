@@ -7,6 +7,8 @@
  * 类型本身（`string`）没有变。
  */
 
+import type { ReasonCode } from './reasons'
+
 export type ImageFormat = 'heic' | 'jpeg' | 'png' | 'webp' | 'avif' | 'gif' | 'tiff' | 'unknown'
 export type OutputFormat = 'keep' | 'jpeg' | 'png' | 'webp'
 export type ItemState = 'pending' | 'working' | 'done' | 'undershot' | 'failed'
@@ -50,6 +52,19 @@ export interface ProbeResponse {
   metas: ImageFileMeta[]
   /** 因为超过上限而被忽略的张数 */
   dropped: number
+}
+
+/**
+ * `task:start` 的返回。
+ *
+ * 启动前的失败（输出目录建不了、不可写）**不抛异常，走返回值** ——
+ * 抛异常的话错误码要穿过 Electron 的 IPC 序列化，`code` 属性能不能活下来
+ * 取决于版本，靠不住。结构化返回是确定的。
+ */
+export interface TaskStartResult {
+  taskId: string
+  /** 启动前就失败的原因；null 表示这批已经跑起来了 */
+  error: ReasonCode | null
 }
 
 export interface StartTaskPayload {

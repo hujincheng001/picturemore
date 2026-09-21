@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { reasonText } from './reason'
+import { batchErrorText, reasonText } from './reason'
 
 /**
  * 原因码 → 文案。
@@ -39,6 +39,48 @@ describe('reasonText', () => {
       const text = reasonText(code) ?? ''
       expect(text.includes('\u2014')).toBe(false)
       expect(text.includes('\u2013')).toBe(false)
+      expect(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text)).toBe(false)
+    }
+  })
+})
+
+describe('batchErrorText', () => {
+  /*
+   * 批次级错误。这三条是用户 2026-09-21 确认的 ——
+   * 原来 DESIGN.md 的 CTA 状态矩阵与 SPEC §8.4 都没有错误态，
+   * 结果是输出目录写不进去时点了没反应。
+   */
+
+  it('磁盘满单独说', () => {
+    expect(batchErrorText('DISK_FULL')).toBe('磁盘满了，后面的图没有处理')
+  })
+
+  it('输出目录相关的几种原因说同一句话', () => {
+    // EACCES / WRITE_FAILED / ENOENT / NOT_A_FILE 在这个语境下都是「这个文件夹用不了」，
+    // 对用户来说没必要区分是权限还是不存在
+    for (const code of ['EACCES', 'WRITE_FAILED', 'ENOENT', 'NOT_A_FILE']) {
+      expect(batchErrorText(code), code).toBe('这个文件夹写不进去，换一个试试')
+    }
+  })
+
+  it('任何认不出来的原因都有兜底，不留空白', () => {
+    // 静默失败比说得不够准更糟
+    for (const code of ['UNKNOWN', 'CORRUPT', 'TIMEOUT', '什么鬼']) {
+      expect(batchErrorText(code), code).toBe('这批没有跑完')
+    }
+  })
+
+  it('没有错误时返回 null，让底部那行去显示常驻声明', () => {
+    expect(batchErrorText(null)).toBeNull()
+    expect(batchErrorText('')).toBeNull()
+  })
+
+  it('文案里没有 em-dash 与 emoji（写作纪律）', () => {
+    for (const code of ['DISK_FULL', 'EACCES', 'UNKNOWN']) {
+      const text = batchErrorText(code) ?? ''
+      expect(text.includes('\u2014')).toBe(false)
+      expect(text.includes('\u2013')).toBe(false)
+      expect((text.match(/·/g) ?? []).length).toBeLessThanOrEqual(1)
       expect(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text)).toBe(false)
     }
   })

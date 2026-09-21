@@ -61,7 +61,7 @@ let fake: Fake
 function install(probeResult?: Partial<ProbeResponse>): void {
   fake = {
     probe: vi.fn(async (): Promise<ProbeResponse> => ({ metas: [], dropped: 0, ...probeResult })),
-    start: vi.fn(async () => ({ taskId: 't1' })),
+    start: vi.fn(async () => ({ taskId: 't1', error: null })),
     cancel: vi.fn(async () => undefined),
     getSettings: vi.fn(async (): Promise<Settings> => ({
       outputDir: null,
@@ -292,14 +292,36 @@ describe('run', () => {
     expect(fake.start).not.toHaveBeenCalled()
   })
 
-  it('启动失败时收场并把原因记下来', async () => {
+  it('启动前的失败走返回值，照样收场并记下原因', async () => {
     // 输出目录不可写之类。不收场的话按钮会一直卡在「处理中」
-    fake.start.mockRejectedValueOnce(new Error('EACCES: permission denied'))
+    fake.start.mockResolvedValueOnce({ taskId: 't1', error: 'EACCES' })
     await useAppStore.getState().run()
     const s = useAppStore.getState()
     expect(s.running).toBe(false)
     expect(s.taskId).toBeNull()
-    expect(s.error).toContain('EACCES')
+    expect(s.error).toBe('EACCES')
+  })
+
+  it('意料之外的异常也要让用户看到，不能静默', async () => {
+    // IPC 断了之类。原来这里存的是原始错误字符串，界面拿它没法映射成文案
+    fake.start.mockRejectedValueOnce(Object.assign(new Error('boom'), { code: 'ENOENT' }))
+    await useAppStore.getState().run()
+    expect(useAppStore.getState().error).toBe('ENOENT')
+    expect(useAppStore.getState().running).toBe(false)
+  })
+
+  it('认不出来的异常也有话说，不留空白', async () => {
+    fake.start.mockRejectedValueOnce(new Error('完全看不懂的错误'))
+    await useAppStore.getState().run()
+    expect(useAppStore.getState().error).toBe('UNKNOWN')
+  })
+
+  it('成功启动时 error 保持为 null，等 task:done 收场', async () => {
+    await useAppStore.getState().run()
+    const s = useAppStore.getState()
+    expect(s.error).toBeNull()
+    // 还没收到 task:done，所以仍在跑
+    expect(s.running).toBe(true)
   })
 })
 

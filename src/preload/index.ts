@@ -5,6 +5,7 @@ import type {
   ProbeResponse,
   Settings,
   StartTaskPayload,
+  TaskStartResult,
   TaskDoneEvent,
   TaskProgressEvent
 } from '../shared/types'
@@ -25,9 +26,8 @@ const api: PictureMoreApi = {
     ipcRenderer.invoke(IPC.probe, { paths, limit }),
   pickImages: (): Promise<{ paths: string[] } | null> => ipcRenderer.invoke(IPC.pickImages),
   pickOutputDir: (): Promise<{ dir: string } | null> => ipcRenderer.invoke(IPC.pickOutputDir),
-  revealInFolder: (path: string): Promise<void> => ipcRenderer.invoke(IPC.revealInFolder, { path }),
 
-  start: (payload: StartTaskPayload): Promise<{ taskId: string }> =>
+  start: (payload: StartTaskPayload): Promise<TaskStartResult> =>
     ipcRenderer.invoke(IPC.taskStart, payload),
   cancel: (taskId: string): Promise<void> => ipcRenderer.invoke(IPC.taskCancel, { taskId }),
 

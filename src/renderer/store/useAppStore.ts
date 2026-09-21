@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { reasonFromError } from '../../shared/reasons'
 import type { OutputFormat, StartTaskPayload, TaskDoneEvent, TaskProgressEvent } from '../../shared/types'
 import { MAX_BATCH, takeWithinLimit } from '../lib/limit'
 import { defaultOutputDir } from '../lib/path'
@@ -206,10 +207,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set({ running: true, taskId, progress: 0, finished: false, error: null })
     try {
-      await window.pictureMore.start(payload)
+      const r = await window.pictureMore.start(payload)
+      // 启动前的失败走返回值（输出目录建不了 / 不可写）。
+      // 不收场的话按钮会一直卡在「处理中」，而用户看不到任何原因
+      if (r.error !== null) {
+        set({ running: false, taskId: null, error: r.error })
+      }
+      // 成功时由 task:done 事件来收场（finishTask）
     } catch (e) {
-      // 输出目录建不了 / 不可写之类，处理前就该报出来，不让用户白等（SPEC §9）
-      set({ running: false, taskId: null, error: (e as Error).message })
+      // 意料之外的错误（IPC 断了之类）。照样要让用户看到，不能静默
+      set({ running: false, taskId: null, error: reasonFromError(e) })
     }
   },
 

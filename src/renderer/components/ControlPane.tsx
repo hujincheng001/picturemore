@@ -36,6 +36,7 @@ export interface ControlPaneProps {
   progress: number
   finished: boolean
   lastOutputDir: string | null
+  error: string | null
   onRun: () => void
 }
 
@@ -66,6 +67,7 @@ export function ControlPane(props: ControlPaneProps): JSX.Element {
         progress={props.progress}
         finished={props.finished}
         lastOutputDir={props.lastOutputDir}
+        error={props.error}
         onClick={props.onRun}
       />
     </aside>

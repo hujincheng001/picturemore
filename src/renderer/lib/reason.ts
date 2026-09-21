@@ -1,4 +1,5 @@
 import type { ReasonCode } from '../../shared/reasons'
+import { COPY } from './copy'
 
 /**
  * 原因码到文案的映射。
@@ -26,4 +27,22 @@ const REASON_TEXT: Partial<Record<ReasonCode, string>> = {
 export function reasonText(code: string | undefined): string | null {
   if (code === undefined) return null
   return REASON_TEXT[code as ReasonCode] ?? null
+}
+
+/**
+ * 批次级错误 → 底部那行显示的文案。
+ *
+ * **与 `reasonText` 分开**：同一个原因码在「单行」和「整批」两种语境下要说的话不一样。
+ * `EACCES` 在行内是「这张读不了」，在整批是「这个文件夹写不进去」。
+ *
+ * 这三条是用户 2026-09-21 确认的（原本 DESIGN.md 与 SPEC §8.4 都没有错误态）。
+ * 兜底那句保证**任何原因码都有话说** —— 静默失败比说得不够准更糟。
+ */
+export function batchErrorText(code: string | null): string | null {
+  if (code === null || code === '') return null
+  if (code === 'DISK_FULL') return COPY.errorDiskFull
+  if (code === 'WRITE_FAILED' || code === 'EACCES' || code === 'ENOENT' || code === 'NOT_A_FILE') {
+    return COPY.errorWriteFailed
+  }
+  return COPY.errorFallback
 }

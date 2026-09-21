@@ -11,8 +11,6 @@ export const IPC = {
   pickImages: 'dialog:pickImages',
   /** R→M → `{ dir } | null` */
   pickOutputDir: 'dialog:pickOutputDir',
-  /** R→M `{ path }` → void */
-  revealInFolder: 'dialog:revealInFolder',
   /** R→M `StartTaskPayload` → `{ taskId }` */
   taskStart: 'task:start',
   /** R→M `{ taskId }` → void */

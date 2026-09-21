@@ -3,7 +3,13 @@ import { constants, existsSync } from 'node:fs'
 import { basename } from 'node:path'
 import { ipcMain, type WebContents } from 'electron'
 import { IPC } from '../../shared/ipc'
-import type { StartTaskPayload, TaskDoneEvent, TaskProgressEvent } from '../../shared/types'
+import { reasonFromError } from '../../shared/reasons'
+import type {
+  StartTaskPayload,
+  TaskDoneEvent,
+  TaskProgressEvent,
+  TaskStartResult
+} from '../../shared/types'
 import { runBatch } from '../batch'
 import { Pool, defaultConcurrency } from '../queue'
 import { EXT, compressOne, probe, resolveOutputPath, targetFormat } from '../image'
@@ -45,12 +51,17 @@ function sendDone(sender: WebContents, payload: TaskDoneEvent): void {
 export function registerTaskIpc(): void {
   ipcMain.handle(
     IPC.taskStart,
-    async (evt, payload: StartTaskPayload): Promise<{ taskId: string }> => {
+    async (evt, payload: StartTaskPayload): Promise<TaskStartResult> => {
       const { taskId, items, shrinkPercent, outputFormat, outputDir } = payload
 
-      // 输出目录：不存在就建，建不了或不可写就当场报错，不让用户白等（SPEC §9）
-      await mkdir(outputDir, { recursive: true })
-      await access(outputDir, constants.W_OK)
+      // 输出目录：不存在就建，建不了或不可写就当场返回，不让用户白等（SPEC §9）。
+      // 不抛异常 —— 见 TaskStartResult 的说明
+      try {
+        await mkdir(outputDir, { recursive: true })
+        await access(outputDir, constants.W_OK)
+      } catch (e) {
+        return { taskId, error: reasonFromError(e) }
+      }
 
       // 记住这次的选择，下次启动沿用
       writeSettings({ outputDir, shrinkPercent, outputFormat })
@@ -128,7 +139,7 @@ export function registerTaskIpc(): void {
         )
       }
 
-      return { taskId }
+      return { taskId, error: null }
     }
   )
 

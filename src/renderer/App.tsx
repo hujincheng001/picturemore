@@ -20,6 +20,7 @@ export default function App(): JSX.Element {
   const progress = useAppStore((s) => s.progress)
   const finished = useAppStore((s) => s.finished)
   const lastOutputDir = useAppStore((s) => s.lastOutputDir)
+  const error = useAppStore((s) => s.error)
   const shrinkPercent = useAppStore((s) => s.shrinkPercent)
   const outputFormat = useAppStore((s) => s.outputFormat)
   const outputDir = useAppStore((s) => s.outputDir)
@@ -82,6 +83,7 @@ export default function App(): JSX.Element {
             progress={progress}
             finished={finished}
             lastOutputDir={lastOutputDir}
+            error={error}
             onRun={() => {
               void run()
             }}

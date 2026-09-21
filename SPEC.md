@@ -529,7 +529,6 @@ heic({ buffer: buf }).then(r => {
 | `files:probe` | R→M | `{ paths: string[] }` | `ImageFileMeta[]` |
 | `dialog:pickImages` | R→M | 无 | `{ paths: string[] } \| null` |
 | `dialog:pickOutputDir` | R→M | 无 | `{ dir: string } \| null` |
-| `dialog:revealInFolder` | R→M | `{ path: string }` | `void` |
 | `task:start` | R→M | `StartTaskPayload` | `{ taskId: string }` |
 | `task:cancel` | R→M | `{ taskId: string }` | `void` |
 | `settings:get` | R→M | 无 | `Settings` |
@@ -764,6 +763,9 @@ CTA 完成         再压一次
 完成提示         完成。原图没动，新文件在 {path}
 列表元信息       共 {n} 张 · {size}
 超过单批上限      （已忽略 {n} 张）      # 跟在元信息后面，2026-09-21 用户决定加单批 100 张上限时新增
+批次错误-写不进去   这个文件夹写不进去，换一个试试   # 2026-09-21 用户确认。底部那行显示
+批次错误-磁盘满    磁盘满了，后面的图没有处理      # 同上
+批次错误-兜底      这批没有跑完                # 同上，保证任何原因都有话说
 清空             清空列表
 移除             移除
 ```
