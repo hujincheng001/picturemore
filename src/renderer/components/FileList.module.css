@@ -1,10 +1,6 @@
 /**
  * 右栏的滚动区。与 prototype/index.html 的 `.files` 对应。
  *
- * 注意选择器换了一层：原型里 `.files` 就是那个 `ul`，而这里 `.files` 是**滚动容器
- * div**，`ul` 在它里面。这是虚拟化需要的 —— 用 ul 的上下 padding 占位时，
- * ul 自己不能同时是滚动容器（否则 padding 会跟着一起滚）。
- *
  * 滚动条按原型调过：细条、滑块用发丝线色、轨道透明。
  * 标准属性（scrollbar-width / scrollbar-color）在 Electron 的 Chromium 上够用，
  * 但原型还给滑块加了 2px 的底色描边让它在白底上不贴边，这一条只有

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { OutputFormat, StartTaskPayload, TaskDoneEvent, TaskProgressEvent } from '../../shared/types'
+import { MAX_BATCH, takeWithinLimit } from '../lib/limit'
 import { defaultOutputDir } from '../lib/path'
 import type { ImageItem } from '../lib/types'
 
@@ -23,6 +24,8 @@ function newTaskId(): string {
 
 export interface AppState {
   items: ImageItem[]
+  /** 最近一次加入时因为超过单批上限而被忽略的张数 */
+  dropped: number
   taskId: string | null
   running: boolean
 
@@ -57,6 +60,7 @@ export interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   items: [],
+  dropped: 0,
   taskId: null,
   running: false,
   shrinkPercent: DEFAULT_SHRINK,
@@ -78,7 +82,17 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async addPaths(paths) {
     if (paths.length === 0) return
-    const metas = await window.pictureMore.probe(paths)
+    const prev = get()
+
+    // 上限在主进程展开目录之后执行，所以这里传的是「还能再收几张」，
+    // 而不是「一共几张」—— 拖进来一个文件夹时只有主进程知道里面有多少
+    const room = Math.max(0, MAX_BATCH - prev.items.length)
+    if (room === 0) {
+      set({ dropped: 0 })
+      return
+    }
+
+    const { metas, dropped } = await window.pictureMore.probe(paths, room)
 
     const fresh: ImageItem[] = metas.map((m) => ({
       id: m.id,
@@ -95,13 +109,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       height: m.height
     }))
 
-    const prev = get()
-    const items = [...prev.items, ...fresh]
+    const { accepted, dropped: extra } = takeWithinLimit(prev.items.length, fresh)
+    const items = [...prev.items, ...accepted]
     // 换了列表就把上一批的完成提示收回去，否则底部那行会自相矛盾
     const outputDir =
       prev.outputDir.length > 0 ? prev.outputDir : defaultOutputDir(paths[0] ?? '')
 
-    set({ items, outputDir, lastOutputDir: null, finished: false, error: null })
+    set({
+      items,
+      outputDir,
+      dropped: dropped + extra,
+      lastOutputDir: null,
+      finished: false,
+      error: null
+    })
   },
 
   async pickFiles() {
@@ -117,7 +138,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   removeItem(id) {
-    set((s) => ({ items: s.items.filter((it) => it.id !== id) }))
+    set((s) => ({
+      items: s.items.filter((it) => it.id !== id),
+      // 空出名额了，之前的「已忽略」提示就不再成立
+      dropped: 0
+    }))
   },
 
   async clear() {
@@ -128,6 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({
       items: [],
+      dropped: 0,
       running: false,
       taskId: null,
       progress: 0,
@@ -200,7 +226,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       running: false,
       taskId: null,
       finished: true,
-      lastOutputDir: e.outputDir
+      lastOutputDir: e.outputDir,
+      // 整批被中止时把原因码留在 error 上。文案要等确认，界面先只记着
+      error: e.aborted ?? null
     })
   },
 

@@ -61,6 +61,13 @@ export const COPY = {
   dropFormats: 'HEIC、JPG、PNG、WebP。一张也行，几十张也行',
   pickFile: '选择文件',
   listMeta: (n: number, size: string): string => `共 ${n} 张 · ${size}`,
+  /**
+   * 超过单批上限时，跟在元信息后面。
+   *
+   * 用括号而不是再加一个中黑点 —— 写作纪律要求「中黑点每行最多一个」。
+   * 这条是用户 2026-09-21 决定加单批 100 张上限时新增的文案，已同步进 SPEC §8.4。
+   */
+  listDropped: (n: number): string => `（已忽略 ${n} 张）`,
   clearList: '清空列表',
   remove: '移除',
   removeAria: (name: string): string => `移除 ${name}`,

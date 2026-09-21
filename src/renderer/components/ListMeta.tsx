@@ -13,14 +13,29 @@ import { formatBytes } from '../lib/format'
 export interface ListMetaProps {
   count: number
   totalBytes: number
+  /** 最近一次加入时因为超过单批上限而被忽略的张数，0 表示没有 */
+  dropped: number
   running: boolean
   onClear: () => void
 }
 
-export function ListMeta({ count, totalBytes, running, onClear }: ListMetaProps): JSX.Element {
+export function ListMeta({
+  count,
+  totalBytes,
+  dropped,
+  running,
+  onClear
+}: ListMetaProps): JSX.Element {
   return (
     <div className="mt-[22px] flex flex-none items-baseline justify-between gap-4 border-b border-line pb-[9px] text-1 tabular-nums text-fg-3">
-      <span>{COPY.listMeta(count, formatBytes(totalBytes))}</span>
+      <span>
+        {COPY.listMeta(count, formatBytes(totalBytes))}
+        {/*
+          被忽略的张数必须说出来。不说的话用户拖进来 500 张、只压了 100 张，
+          会以为全压完了 —— 这是静默丢数据，比报错更糟。
+        */}
+        {dropped > 0 && <span className="text-caution">{COPY.listDropped(dropped)}</span>}
+      </span>
       <button
         type="button"
         onClick={onClear}

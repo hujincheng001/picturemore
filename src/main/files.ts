@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { reasonFromError } from '../shared/reasons'
-import type { ImageFileMeta } from '../shared/types'
+import type { ImageFileMeta, ProbeResponse } from '../shared/types'
 import { probe } from './image'
 
 /**
@@ -109,17 +109,29 @@ export async function metaFor(path: string): Promise<ImageFileMeta> {
   }
 }
 
-/** 把一批输入路径展开并逐张读元信息。展开顺序稳定，方便断言 */
-export async function probePaths(raw: string[]): Promise<ImageFileMeta[]> {
+/**
+ * 把一批输入路径展开并逐张读元信息。
+ *
+ * `limit` 是**还能再收几张**（不是总数）。展开之后立刻截断再读盘 ——
+ * 拖进来一个装了几千张图的文件夹时，先读全量再截会白白慢几十秒。
+ *
+ * 返回值带 `dropped`，让界面能如实告诉用户「有 N 张被忽略了」，
+ * 而不是让用户以为全压了。
+ */
+export async function probePaths(raw: string[], limit?: number): Promise<ProbeResponse> {
   const paths: string[] = []
   for (const p of raw) {
     if (typeof p === 'string' && p.length > 0) paths.push(...(await expand(p)))
   }
 
+  const room = typeof limit === 'number' && Number.isFinite(limit) ? Math.max(0, limit) : paths.length
+  const taken = paths.slice(0, room)
+  const dropped = paths.length - taken.length
+
   // 逐张处理而不是 Promise.all：一次拖进几百张时，同时打开几百个文件句柄没必要
-  const out: ImageFileMeta[] = []
-  for (const p of paths) {
-    out.push(await metaFor(p))
+  const metas: ImageFileMeta[] = []
+  for (const p of taken) {
+    metas.push(await metaFor(p))
   }
-  return out
+  return { metas, dropped }
 }

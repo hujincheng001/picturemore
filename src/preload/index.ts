@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { PictureMoreApi } from '../shared/api'
 import { IPC } from '../shared/ipc'
 import type {
-  ImageFileMeta,
+  ProbeResponse,
   Settings,
   StartTaskPayload,
   TaskDoneEvent,
@@ -21,7 +21,8 @@ import type {
  */
 
 const api: PictureMoreApi = {
-  probe: (paths: string[]): Promise<ImageFileMeta[]> => ipcRenderer.invoke(IPC.probe, { paths }),
+  probe: (paths: string[], limit?: number): Promise<ProbeResponse> =>
+    ipcRenderer.invoke(IPC.probe, { paths, limit }),
   pickImages: (): Promise<{ paths: string[] } | null> => ipcRenderer.invoke(IPC.pickImages),
   pickOutputDir: (): Promise<{ dir: string } | null> => ipcRenderer.invoke(IPC.pickOutputDir),
   revealInFolder: (path: string): Promise<void> => ipcRenderer.invoke(IPC.revealInFolder, { path }),

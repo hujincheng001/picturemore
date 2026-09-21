@@ -38,6 +38,20 @@ export interface ImageFileMeta {
   reason?: string
 }
 
+/**
+ * `files:probe` 的返回。
+ *
+ * 为什么带 `dropped`：单批有 100 张的上限，而**一次拖入可能是几千个文件**
+ * （拖一个装了几千张图的文件夹）。展开是主进程做的，只有它知道到底有多少张，
+ * 所以由它截断并回报被忽略的数量 —— 渲染层要是先拿全量再截，就得先把几千个文件
+ * 都读一遍，白白慢几十秒。
+ */
+export interface ProbeResponse {
+  metas: ImageFileMeta[]
+  /** 因为超过上限而被忽略的张数 */
+  dropped: number
+}
+
 export interface StartTaskPayload {
   taskId: string
   items: Array<{
@@ -75,6 +89,13 @@ export interface TaskDoneEvent {
   undershot: number
   failed: number
   outputDir: string
+  /**
+   * 整批被中止的原因（SPEC §9：「磁盘空间不足 → 中止整批并提示」）。
+   *
+   * 有值时说明这批没跑完：后面那些图**没有处理过**，不是失败，
+   * 界面要据此区分「这批跑完了但有 N 张失败」和「这批中途停了」。
+   */
+  aborted?: string
 }
 
 export interface Settings {

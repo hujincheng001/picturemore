@@ -3,24 +3,32 @@ import { constants, existsSync } from 'node:fs'
 import { basename } from 'node:path'
 import { ipcMain, type WebContents } from 'electron'
 import { IPC } from '../../shared/ipc'
-import { reasonFromError } from '../../shared/reasons'
 import type { StartTaskPayload, TaskDoneEvent, TaskProgressEvent } from '../../shared/types'
-import { CANCELLED, Pool, defaultConcurrency } from '../queue'
+import { runBatch } from '../batch'
+import { Pool, defaultConcurrency } from '../queue'
 import { EXT, compressOne, probe, resolveOutputPath, targetFormat } from '../image'
 import { writeSettings } from '../settings'
 import { timeoutFor, withTimeout } from '../timeout'
 
 /**
- * 批量压缩的编排。全部留在主进程（红线三：渲染进程不碰文件系统）。
+ * 批量压缩的 IPC 入口。全部留在主进程（红线三：渲染进程不碰文件系统）。
  *
- * 单张的流程：读文件 → probe → compressOne → 定输出名 → 写盘 → 推一行进度。
- * 每张完成立刻推，不等整批（SPEC §4.8）；单张失败不中断整批，标记该张后继续。
- *
- * 超时策略在 `src/main/timeout.ts`（不依赖 electron，可单测）。
+ * 这一层只做三件事：建输出目录、把「读文件 → probe → 压缩 → 写盘」注入进编排、
+ * 把结果转成 IPC 事件。**编排本身在 `src/main/batch.ts`**（不依赖 electron，
+ * 中止逻辑与计数都单测过），超时策略在 `src/main/timeout.ts`。
  */
 
 interface ActiveTask {
   pool: Pool
+}
+
+/** 每张的输出信息，进度事件要用。键是 itemId */
+interface OutputMeta {
+  name: string
+  bytes: number
+  width: number
+  height: number
+  quality: number | null
 }
 
 const active = new Map<string, ActiveTask>()
@@ -50,82 +58,75 @@ export function registerTaskIpc(): void {
       const pool = new Pool(defaultConcurrency())
       active.set(taskId, { pool })
 
-      let done = 0
-      let undershot = 0
-      let failed = 0
+      const lastOutput = new Map<string, OutputMeta>()
 
-      const results = await Promise.allSettled(
-        items.map((item, index) =>
-          pool.run(async () => {
-            const progress = (
-              state: TaskProgressEvent['state'],
-              extra: Partial<TaskProgressEvent> = {}
-            ): void => {
-              sendProgress(evt.sender, {
-                taskId,
-                itemId: item.id,
-                index,
-                total: items.length,
-                state,
-                ...extra
-              })
-            }
+      const summary = await runBatch(items, pool, {
+        processOne: async (item) => {
+          const buf = await readFile(item.path)
+          const probed = await probe(buf)
+          const { data, result } = await withTimeout(
+            compressOne({ buf, shrinkPercent, outputFormat, probe: probed }),
+            timeoutFor(item.width, item.height)
+          )
 
-            progress('working')
-
-            try {
-              const buf = await readFile(item.path)
-              const probed = await probe(buf)
-              const { data, result } = await withTimeout(
-                compressOne({ buf, shrinkPercent, outputFormat, probe: probed }),
-                timeoutFor(item.width, item.height)
-              )
-
-              const outPath = resolveOutputPath({
-                sourcePath: item.path,
-                outputDir,
-                targetExt: EXT[targetFormat(probed, outputFormat)],
-                exists: existsSync
-              })
-
-              await writeFile(outPath, data)
-
-              progress(result.undershot ? 'undershot' : 'done', {
-                outBytes: result.bytes,
-                outName: basename(outPath),
-                width: result.width,
-                height: result.height,
-                quality: result.quality
-              })
-
-              if (result.undershot) undershot++
-              else done++
-            } catch (e) {
-              failed++
-              progress('failed', { reason: reasonFromError(e) })
-            }
+          const outPath = resolveOutputPath({
+            sourcePath: item.path,
+            outputDir,
+            targetExt: EXT[targetFormat(probed, outputFormat)],
+            exists: existsSync
           })
-        )
-      )
+
+          await writeFile(outPath, data)
+
+          // 输出名与真实体积留在旁边，onProgress 里带上
+          lastOutput.set(item.id, {
+            name: basename(outPath),
+            bytes: result.bytes,
+            width: result.width,
+            height: result.height,
+            quality: result.quality
+          })
+          return result.undershot ? 'undershot' : 'done'
+        },
+
+        onProgress: (item, index, state, reason) => {
+          const meta = lastOutput.get(item.id)
+          sendProgress(evt.sender, {
+            taskId,
+            itemId: item.id,
+            index,
+            total: items.length,
+            state,
+            ...(meta === undefined
+              ? {}
+              : {
+                  outBytes: meta.bytes,
+                  outName: meta.name,
+                  width: meta.width,
+                  height: meta.height,
+                  quality: meta.quality
+                }),
+            ...(reason === undefined ? {} : { reason })
+          })
+        }
+      })
 
       active.delete(taskId)
 
-      // 被 cancelPending 跳过的那些以 CANCELLED 拒绝，不计入 failed ——
-      // 用户本来就在清列表，把它们算成失败会在完成提示里给出错误数字。
-      const cancelled = results.filter(
-        (r) => r.status === 'rejected' && (r.reason as Error | undefined)?.message === CANCELLED
-      ).length
-
       sendDone(evt.sender, {
         taskId,
-        done: done + undershot,
-        undershot,
-        failed,
-        outputDir
+        done: summary.done + summary.undershot,
+        undershot: summary.undershot,
+        failed: summary.failed,
+        outputDir,
+        ...(summary.aborted === null ? {} : { aborted: summary.aborted })
       })
 
-      // cancelled 只用于日志，界面上那几行已经被用户清掉了
-      if (cancelled > 0) console.info(`[task] ${taskId} 跳过 ${cancelled} 张`)
+      if (summary.skipped > 0) {
+        console.info(
+          `[task] ${taskId} 跳过 ${summary.skipped} 张${summary.aborted === null ? '' : `（${summary.aborted}）`}`
+        )
+      }
 
       return { taskId }
     }

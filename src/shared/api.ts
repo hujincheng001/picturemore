@@ -1,5 +1,5 @@
 import type {
-  ImageFileMeta,
+  ProbeResponse,
   Settings,
   StartTaskPayload,
   TaskDoneEvent,
@@ -13,7 +13,13 @@ import type {
  * 渲染进程拿不到 electron，类型里也不该引用它。
  */
 export interface PictureMoreApi {
-  probe(paths: string[]): Promise<ImageFileMeta[]>
+  /**
+   * 读一批路径的元信息。
+   *
+   * `limit` 是**还能再收几张**（不是总数）。主进程展开目录之后按它截断，
+   * 并把被忽略的张数放在 `dropped` 里回报。
+   */
+  probe(paths: string[], limit?: number): Promise<ProbeResponse>
   pickImages(): Promise<{ paths: string[] } | null>
   pickOutputDir(): Promise<{ dir: string } | null>
   revealInFolder(path: string): Promise<void>

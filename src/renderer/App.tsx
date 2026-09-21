@@ -15,6 +15,7 @@ import { useAppStore } from './store/useAppStore'
  */
 export default function App(): JSX.Element {
   const items = useAppStore((s) => s.items)
+  const dropped = useAppStore((s) => s.dropped)
   const running = useAppStore((s) => s.running)
   const progress = useAppStore((s) => s.progress)
   const finished = useAppStore((s) => s.finished)
@@ -89,6 +90,7 @@ export default function App(): JSX.Element {
 
         <FileList
           items={items}
+          dropped={dropped}
           running={running}
           onPaths={(paths) => {
             void addPaths(paths)

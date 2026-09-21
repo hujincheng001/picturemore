@@ -144,6 +144,29 @@ async function main() {
 
   const evaluate = (expression) => cdpEvaluate(cdp, expression)
 
+  /*
+   * 等 React 真正挂载完再开始检查。
+   *
+   * `waitForPage` 只保证「有一个可调试的页面」，那时 index.html 可能刚解析完、
+   * React 还没渲染。不等的话前面的检查会量到空 DOM —— 而且**不会报错**，
+   * 只会报出一堆「元素不存在」，看起来像应用坏了。
+   *
+   * 这个竞态之前一直存在，只是恰好没触发；加了虚拟化之后主进程产物变大，
+   * 启动慢了一点就露出来了。属于「迟早会红一次然后被当 flaky」的那类问题。
+   */
+  let mounted = false
+  for (let i = 0; i < 80; i++) {
+    mounted = await evaluate(
+      `(document.getElementById('root')?.childElementCount ?? 0) > 0`
+    )
+    if (mounted === true) break
+    await sleep(150)
+  }
+  if (!mounted) {
+    console.error('[smoke] 等 12s 后渲染层仍未挂载')
+    return 1
+  }
+
   // ---- 0. 全程监听网络请求（承诺一：运行时零联网）----
   // 比「拔网线」更严格：拔网线只能证明断网时能用，这里能证明**根本没有发出请求**。
   // 必须在任何交互之前打开，否则会漏掉早期的请求。
@@ -598,6 +621,61 @@ async function main() {
     console.log(`  ${hasTxt ? '失败' : '通过'}  列表里没有 .txt（当前：${names.join(', ')}）`)
   } catch (e) {
     failures.push(`文件夹展开检查失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
+  }
+
+  // ---- 14. 单批上限 100 张 ----
+  // 用户 2026-09-21 的决定。这条必须端到端验：上限在主进程展开目录之后执行，
+  // 而「以为全压了其实只压了一部分」是静默丢数据，比报错更糟。
+  console.log('\n[smoke] 单批上限 100 张：')
+  try {
+    // 先清空，好让名额从 0 算起
+    await evaluate(
+      `[...document.querySelectorAll('button')].find((b) => b.textContent === '清空列表')?.click()`
+    )
+    await sleep(400)
+
+    // 造 500 张小图
+    const bulkDir = resolve(ROOT, 'tests/fixtures/_bulk500')
+    rmSync(bulkDir, { recursive: true, force: true })
+    mkdirSync(bulkDir, { recursive: true })
+    const tiny = resolve(ROOT, 'tests/fixtures/tiny-1x1.png')
+    for (let i = 0; i < 500; i++) {
+      copyFileSync(tiny, resolve(bulkDir, `img-${String(i).padStart(4, '0')}.png`))
+    }
+
+    for (const type of ['dragEnter', 'dragOver', 'drop']) {
+      await cdp.send('Input.dispatchDragEvent', {
+        type,
+        x: 640,
+        y: 300,
+        data: { items: [], files: [bulkDir], dragOperationsMask: 1 }
+      })
+    }
+
+    // 等元信息行报出张数
+    let meta = ''
+    for (let i = 0; i < 240; i++) {
+      meta = await evaluate(
+        `[...document.querySelectorAll('main span')].map((el) => el.textContent).find((t) => /^共 \\d+ 张/.test(t || '')) ?? ''`
+      )
+      if (/^共 \d+ 张/.test(meta)) break
+      await sleep(250)
+    }
+
+    const rows = await evaluate(`document.querySelectorAll('main li').length`)
+    const rowsOk = rows === 100
+    if (!rowsOk) failures.push(`单批上限应为 100 行，实际 ${rows} 行`)
+    console.log(`  ${rowsOk ? '通过' : '失败'}  列表 ${rows} 行（期望 100）`)
+
+    // 提示里必须报出被忽略的张数，否则用户以为全压了
+    const metaOk = /^共 100 张 · .+（已忽略 400 张）$/.test(meta)
+    if (!metaOk) failures.push(`上限提示不对：实际「${meta}」`)
+    console.log(`  ${metaOk ? '通过' : '失败'}  元信息 = ${meta}`)
+
+    rmSync(bulkDir, { recursive: true, force: true })
+  } catch (e) {
+    failures.push(`单批上限检查失败：${e.message}`)
     console.log(`  失败  ${e.message}`)
   }
 

@@ -123,8 +123,8 @@ try {
     cdp,
     `(async () => {
       try {
-        const metas = await window.pictureMore.probe(${JSON.stringify(FIXTURES)})
-        return { ok: true, metas: metas.map((m) => ({ name: m.name, format: m.format, width: m.width, height: m.height, readable: m.readable, reason: m.reason })) }
+        const r = await window.pictureMore.probe(${JSON.stringify(FIXTURES)})
+        return { ok: true, metas: r.metas.map((m) => ({ name: m.name, format: m.format, width: m.width, height: m.height, readable: m.readable, reason: m.reason })), dropped: r.dropped }
       } catch (e) {
         return { ok: false, message: String(e && e.message || e) }
       }

@@ -79,11 +79,12 @@
 ## 怎么验证
 
 ```bash
-npm run check            # 主护栏：lint:no-resize + typecheck + 130 条测试（约 5 分钟）
+npm run check            # 主护栏：lint:no-resize + typecheck + 241 条测试（约 5 分钟）
 npm test                 # 只跑测试
 npm run test:watch       # 测试 watch 模式
-npm run smoke            # 端到端：构建 + 启动 + 18 组检查 + 5 张截图（需加上面的环境变量）
+npm run smoke            # 端到端：构建 + 启动 + 19 组检查 + 5 张截图（需加上面的环境变量）
 npm run smoke:packaged   # 打包产物冒烟（先 npm run build）
+npm run measure:500      # 量 500 行列表的性能（上限 100 张之后主要留作参考）
 npm run fixtures         # 重新生成合成测试图
 npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
 ```
@@ -118,6 +119,7 @@ npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
 | 动效 | 只动 `transform` / `opacity` / 颜色。必须有 `prefers-reduced-motion` 兜底 |
 | 网络 | 任何需要联网的依赖、CDN、云 API 一律不加。`src/main/security.ts` 在运行时也会拦 |
 | 尺寸 | 改界面先跑 `npm run smoke`。它会量 35 项布局硬指标，对不上就是和原型不一致 |
+| 单批上限 | **一次最多 100 张**（用户 2026-09-21 决定）。上限在 `src/renderer/lib/limit.ts`，实际截断在主进程展开目录之后执行。改这个数要同步改 SPEC §9 |
 
 ---
 
@@ -148,7 +150,9 @@ npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
 - 图像引擎：`src/main/image/` 全部模块 + 黄金测试（9 张 fixture × 4 个压缩档）
 - 界面：12 个组件，与原型逐项对齐，冒烟脚本 35 项布局硬指标 + 5 张截图
 - 全链路：拖拽 → probe → 压缩 → 写盘 → 逐行进度，端到端跑通
+- 单批上限 100 张，超出的如实报出「（已忽略 N 张）」
 - 打包：NSIS 安装包 115MB，包内容核查干净
+- 测试 241 条（含批处理编排、设置容错、路径分隔符、上限截断）
 
 ### 还挂着的（需要用户拍板，不要自己决定）
 

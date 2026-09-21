@@ -177,31 +177,84 @@ describe('metaFor', () => {
 
 describe('probePaths', () => {
   it('文件夹与文件混着传，展开后顺序稳定', async () => {
-    const out = await probePaths([
+    const { metas, dropped } = await probePaths([
       join(workDir, 'mixed'),
       join(FIXTURES, 'oriented-6.jpg')
     ])
-    expect(out.map((m) => m.name)).toEqual(['a.jpg', 'b.png', 'oriented-6.jpg'])
+    expect(metas.map((m) => m.name)).toEqual(['a.jpg', 'b.png', 'oriented-6.jpg'])
+    expect(dropped).toBe(0)
   })
 
   it('非图片与空字符串都被过滤掉', async () => {
-    const out = await probePaths(['', join(workDir, 'mixed', 'note.txt'), join(workDir, 'nope.jpg')])
+    const { metas } = await probePaths([
+      '',
+      join(workDir, 'mixed', 'note.txt'),
+      join(workDir, 'nope.jpg')
+    ])
     // txt 被静默丢掉；不存在的路径会保留下来并给出 ENOENT
-    expect(out.map((m) => m.name)).toEqual(['nope.jpg'])
-    expect(out[0]?.reason).toBe('ENOENT')
+    expect(metas.map((m) => m.name)).toEqual(['nope.jpg'])
+    expect(metas[0]?.reason).toBe('ENOENT')
   })
 
   it('空输入返回空数组', async () => {
-    expect(await probePaths([])).toEqual([])
+    const r = await probePaths([])
+    expect(r.metas).toEqual([])
+    expect(r.dropped).toBe(0)
   })
 
   it('一张失败不影响其余（SPEC §4.8）', async () => {
-    const out = await probePaths([
+    const { metas } = await probePaths([
       join(workDir, 'nope.jpg'),
       join(FIXTURES, 'tiny-1x1.png'),
       join(workDir, 'empty.png')
     ])
-    expect(out).toHaveLength(3)
-    expect(out.map((m) => m.readable)).toEqual([false, true, false])
+    expect(metas).toHaveLength(3)
+    expect(metas.map((m) => m.readable)).toEqual([false, true, false])
+  })
+})
+
+describe('probePaths 的上限截断', () => {
+  it('超过上限的部分不读盘，并如实回报被忽略的张数', async () => {
+    // 上限在展开之后、读盘之前执行 —— 拖进来一个几千张的文件夹时，
+    // 先读全量再截会白白慢几十秒
+    const { metas, dropped } = await probePaths([join(workDir, 'mixed')], 1)
+    expect(metas.map((m) => m.name)).toEqual(['a.jpg'])
+    expect(dropped).toBe(1)
+  })
+
+  it('上限为 0 时一张都不收', async () => {
+    const { metas, dropped } = await probePaths([join(workDir, 'mixed')], 0)
+    expect(metas).toEqual([])
+    expect(dropped).toBe(2)
+  })
+
+  it('没给上限时全收', async () => {
+    const { metas, dropped } = await probePaths([join(workDir, 'mixed')])
+    expect(metas).toHaveLength(2)
+    expect(dropped).toBe(0)
+  })
+
+  it('上限大于实际数量时不报多余的忽略', async () => {
+    const { metas, dropped } = await probePaths([join(workDir, 'mixed')], 999)
+    expect(metas).toHaveLength(2)
+    expect(dropped).toBe(0)
+  })
+
+  it('非法的上限值不当作 0，而是当作不限', async () => {
+    // 参数来自 IPC，不能假设它一定是数字
+    for (const bad of [undefined, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const { metas } = await probePaths([join(workDir, 'mixed')], bad)
+      expect(metas, `limit=${String(bad)}`).toHaveLength(2)
+    }
+  })
+
+  it('截断发生在展开之后，所以文件夹里超出的那些也算被忽略', async () => {
+    // 混着一个文件夹和一个单文件：文件夹出 2 张，单文件 1 张，上限 2
+    const { metas, dropped } = await probePaths(
+      [join(workDir, 'mixed'), join(FIXTURES, 'oriented-6.jpg')],
+      2
+    )
+    expect(metas.map((m) => m.name)).toEqual(['a.jpg', 'b.png'])
+    expect(dropped).toBe(1)
   })
 })

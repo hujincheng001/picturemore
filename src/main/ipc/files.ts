@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { IPC } from '../../shared/ipc'
-import type { ImageFileMeta } from '../../shared/types'
+import type { ProbeResponse } from '../../shared/types'
 import { probePaths } from '../files'
 
 /**
@@ -10,8 +10,11 @@ import { probePaths } from '../files'
  * 这里只做转发。
  */
 export function registerFilesIpc(): void {
-  ipcMain.handle(IPC.probe, async (_evt, payload: { paths: string[] }): Promise<ImageFileMeta[]> => {
-    const raw = Array.isArray(payload?.paths) ? payload.paths : []
-    return probePaths(raw)
-  })
+  ipcMain.handle(
+    IPC.probe,
+    async (_evt, payload: { paths: string[]; limit?: number }): Promise<ProbeResponse> => {
+      const raw = Array.isArray(payload?.paths) ? payload.paths : []
+      return probePaths(raw, payload?.limit)
+    }
+  )
 }

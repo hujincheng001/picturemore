@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { reasonFromError } from './reasons'
+import { isBatchFatal, reasonFromError } from './reasons'
 
 /**
  * 把异常映射成原因码。
@@ -21,8 +21,10 @@ describe('reasonFromError', () => {
     expect(reasonFromError(Object.assign(new Error('x'), { code: 'EISDIR' }))).toBe('NOT_A_FILE')
   })
 
-  it('磁盘满与只读归到写失败', () => {
-    expect(reasonFromError(Object.assign(new Error('x'), { code: 'ENOSPC' }))).toBe('WRITE_FAILED')
+  it('磁盘满与只读盘分开归类', () => {
+    // 磁盘满是**整批致命**的（SPEC §9 要求中止整批），只读盘只是这张写不进去。
+    // 两者混在一个码里的话，中止逻辑就无从判断
+    expect(reasonFromError(Object.assign(new Error('x'), { code: 'ENOSPC' }))).toBe('DISK_FULL')
     expect(reasonFromError(Object.assign(new Error('x'), { code: 'EROFS' }))).toBe('WRITE_FAILED')
   })
 
@@ -48,5 +50,29 @@ describe('reasonFromError', () => {
     expect(reasonFromError(undefined)).toBe('UNKNOWN')
     expect(reasonFromError('boom')).toBe('UNKNOWN')
     expect(reasonFromError(42)).toBe('UNKNOWN')
+  })
+})
+
+describe('isBatchFatal', () => {
+  it('只有磁盘满是整批致命的', () => {
+    // SPEC §9：「磁盘空间不足 | 捕获 ENOSPC，中止整批并提示」
+    expect(isBatchFatal('DISK_FULL')).toBe(true)
+  })
+
+  it('单张自己的问题不该拖累整批', () => {
+    // 一张图读不了、损坏、超时，都是那张自己的事。
+    // 把它们也当成整批致命的话，一张坏图会让后面几百张都不处理
+    for (const code of [
+      'ENOENT',
+      'EACCES',
+      'NOT_A_FILE',
+      'CORRUPT',
+      'HEIC_DECODE_FAILED',
+      'TIMEOUT',
+      'WRITE_FAILED',
+      'UNKNOWN'
+    ] as const) {
+      expect(isBatchFatal(code), `${code} 不该中止整批`).toBe(false)
+    }
   })
 })
