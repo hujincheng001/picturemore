@@ -4,8 +4,8 @@ node_modules/
 # 构建产物
 out/
 dist/
-release/
-release-next/
+release*/
+
 
 # electron-vite 构建时生成的临时配置（带时间戳，构建中断会残留）
 electron.vite.config.*.mjs

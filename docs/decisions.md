@@ -1583,6 +1583,62 @@ export interface TaskStartResult {
 这一轮扫出三处（`revealInFolder` 孤儿通道、`error` 未消费、以及早先的
 `isSupportedExt` 定义了但没用上），都不是靠读代码能看出来的。
 
+---
+
+## 收尾十一：`app.asar` 锁的成因查清了
+
+T18-5 记过 `EBUSY: resource busy or locked, unlink app.asar`，当时没查到成因。
+这一轮又撞了两次（`release-next` 也锁了），把规律摸清了。
+
+### 规律
+
+**往一个新目录首次出包能成功，重新出包必失败。**
+
+- `release/`：9-20 首次成功，9-21 重出失败
+- `release-next/`：9-21 21:30 首次成功，9-21 23:30 重出失败
+
+原因一致：重新出包时 electron-builder 要先 `unlink` 已存在的 `app.asar`，而它删不掉。
+
+### 成因：delete-pending
+
+关键证据是**空间没释放**：我把 `release/win-unpacked` 和 `release-next/win-unpacked`
+里除 `app.asar` 之外的文件全删了，只剩两个 9.5MB 的文件，但 `du` 仍报 719MB / 492MB。
+
+**说明那些文件处于 delete-pending 状态**：已被标记删除，但持有句柄的进程没关，
+空间要等重启才回收。
+
+这就解释了全部现象：
+
+| 现象 | 解释 |
+|---|---|
+| `unlink` 报 EBUSY | delete-pending 的文件不能再被 unlink |
+| `rename` 也报 EBUSY | 同上，改名也需要独占 |
+| 按进程名/路径都找不到占用者 | 占用者不是「打开着这个路径的进程」，而是一个残留句柄 |
+| 跨重启存活（当时以为） | 其实中间那次重启发生在锁形成之前，看错了时间线 |
+| 删掉文件后空间不释放 | delete-pending 的典型表现 |
+
+### 处置
+
+**每轮出包换一个新目录**，`release-102` 这类。`electron-builder.yml` 里仍写 `release`
+（正常路径），临时目录用 `-c.directories.output=...` 覆盖，`.gitignore` 改成 `release*/` 统一忽略。
+
+**重启之后**这些目录就能正常删除，恢复正常出包流程。
+
+**这不是项目问题**：换台机器、或者正常关闭应用之后再出包，都不会遇到。
+但本机已经积累了三个 release 目录（约 1.7GB，其中约 1.2GB 要等重启才回收），
+重启后记得清一下。
+
+### 一条可以推广的经验
+
+**「文件删不掉」先看空间有没有释放。**
+
+空间释放了 → 真的只是句柄占用，找出进程就行。
+空间没释放 → delete-pending，别白费力气找进程，重启是唯一解。
+
+这个判据能省下大量排查时间 —— 我前面按进程名、按路径、按只读属性查了一圈，
+都不如 `du` 一次对比来得直接。
+
+
 
 
 
