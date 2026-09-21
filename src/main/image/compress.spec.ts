@@ -33,6 +33,23 @@ const FILES = [
 
 const PERCENTS = [20, 45, 70, 85]
 
+/**
+ * 单张的测试预算。
+ *
+ * `huge-8000.jpg` 是 48MP 纯噪声，p=20 时**单独跑要 104s**（见 docs/decisions.md 的 T7-3）：
+ * 底线命中目标，二分要跑满 5 到 6 次，每次约 23s。
+ *
+ * 原来给的是固定的 120s，全量并行时机器负载上来就偶发超时 ——
+ * **这类「测试本身很慢」的用例必须给足预算，不能让它变成 flaky**：
+ * 一个时红时绿的测试，最后一定会被人当成噪音忽略掉，那比没有测试更糟。
+ */
+const TIMEOUT_MS: Record<string, number> = {
+  'huge-8000.jpg': 300_000,
+  'noise-hi.jpg': 180_000,
+  'iphone-portrait.heic': 120_000
+}
+const budgetFor = (name: string): number => TIMEOUT_MS[name] ?? 60_000
+
 describe('compressOne 黄金断言', () => {
   for (const name of FILES) {
     for (const p of PERCENTS) {
@@ -68,7 +85,7 @@ describe('compressOne 黄金断言', () => {
 
         // undershot 的定义就是"没压到目标体积"
         expect(result.undershot).toBe(result.bytes > targetBytes(buf.length, p))
-      }, 120_000)
+      }, budgetFor(name))
     }
   }
 

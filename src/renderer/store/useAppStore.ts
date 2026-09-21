@@ -109,8 +109,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       height: m.height
     }))
 
+    /*
+     * 本地再截一次是**跨进程边界的防御**，正常路径上不会触发 ——
+     * 主进程的 probe 已经按限额截过了。
+     *
+     * 留它的理由是：渲染层不该无条件相信对端。万一主进程那边限额算错、
+     * 多返回几百行，界面会直接被撑破，而这里能兜住并把多出来的算进「已忽略」。
+     */
     const { accepted, dropped: extra } = takeWithinLimit(prev.items.length, fresh)
     const items = [...prev.items, ...accepted]
+
     // 换了列表就把上一批的完成提示收回去，否则底部那行会自相矛盾
     const outputDir =
       prev.outputDir.length > 0 ? prev.outputDir : defaultOutputDir(paths[0] ?? '')
