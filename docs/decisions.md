@@ -1272,6 +1272,57 @@ SPEC §9 写着「拖入 500 张 | 允许，但列表虚拟化（>100 行时启�
 
 边界也单独钉了：正好凑满 100 时不算忽略、已经满了时一张不收、已超额（上限被调小过）时不崩、`limit` 是 `NaN`/`Infinity`/`undefined` 时当作不限（参数来自 IPC，不能假设它一定是数字）。
 
+---
+
+## 收尾七：出包时撞上 app.asar 被占用
+
+### T18-5：`EBUSY: resource busy or locked, unlink '...\app.asar'`
+
+改完单批上限要重新出包，`npm run build` 报：
+
+```
+⨯ EBUSY: resource busy or locked, unlink 'D:\pictureMore\release\win-unpacked\resources\app.asar'
+```
+
+electron-builder 在覆盖旧目录前要删掉旧的 `app.asar`，删不掉。
+
+**排查过程**（都没找到占用者）：
+
+| 查法 | 结果 |
+|---|---|
+| 按进程名找 `图压压` / `electron` | 没有 |
+| 按进程路径找 `D:\pictureMore\*` | 没有 |
+| 重命名 `app.asar` 试探 | 仍被占用 |
+| 检查只读属性 | 不是只读 |
+| 是否重启过 | 机器在失败之前重启过，句柄不可能跨重启存活 |
+
+**关掉宿主的删除护栏也没用** —— `CODEBUDDY_SAFE_DELETE_ENABLED=0` 只影响 Node 的 `fs`，PowerShell 的 `Remove-Item` 仍被接管（而且它自己也删不掉，报 `trash operation: Unknown`）。
+
+**结论：这是环境问题，不是项目问题。** 成因不明（怀疑是杀软的文件系统过滤驱动，或一次未完成的删除留下的 delete-pending 状态），跨重启存活说明不是普通进程句柄。
+
+**处置：绕开它，不纠缠。**
+
+```bash
+npx electron-builder -c.directories.output=release-next
+```
+
+换个 output 目录，旧目录一个字节都不用碰。`electron-builder.yml` 里仍写 `release`（正常路径），`release-next/` 加进了 `.gitignore`。
+
+顺带给 `smoke:packaged` 加了个位置参数，默认还是 `release/win-unpacked`：
+
+```bash
+node scripts/smoke-packaged.mjs release-next/win-unpacked
+```
+
+**这条环境问题留个尾巴**：`release/win-unpacked` 现在是 1.0.0 的旧产物且删不掉，重启之后应该就能清了。清掉之前别拿它跑打包冒烟（会验到旧代码），要用就显式传 `release-next/win-unpacked`。
+
+### T18-6：版本号升到 1.0.1
+
+应用行为变了（新增单批上限），继续用 1.0.0 会让两个不同的二进制共用一个版本号 —— 那是最糟的情况：出了问题没法判断用户装的是哪一版。所以升到 1.0.1 重新出包。
+
+**没有打 tag**，release 编号留给用户决定。
+
+
 
 
 

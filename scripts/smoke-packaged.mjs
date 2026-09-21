@@ -22,9 +22,19 @@ import sharp from 'sharp'
 import { connect, evaluate, sleep, waitForPage } from './lib/cdp.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const EXE = resolve(ROOT, 'release/win-unpacked/图压压.exe')
+
+/**
+ * 打包产物的位置。默认 `release/win-unpacked`，可以用第一个参数覆盖：
+ *
+ *   node scripts/smoke-packaged.mjs release-next/win-unpacked
+ *
+ * 留这个口子是因为 Windows 上偶尔会出现 app.asar 被占用、导致 electron-builder
+ * 没法覆盖旧目录（EBUSY），那时只能换个 output 目录出包。见 docs/decisions.md 的 T18-5。
+ */
+const UNPACKED = resolve(ROOT, process.argv[2] ?? 'release/win-unpacked')
+const EXE = resolve(UNPACKED, '图压压.exe')
 const PORT = 9444
-const OUT_DIR = resolve(ROOT, 'release/_smoke-out')
+const OUT_DIR = resolve(UNPACKED, '..', '_smoke-out')
 const FIXTURES = ['oriented-6.jpg', 'flat-solid.png', 'iphone-portrait.heic'].map((f) =>
   resolve(ROOT, 'tests/fixtures', f)
 )
@@ -219,7 +229,7 @@ if (failures.length > 0) {
   console.log('\n[packaged] 全部通过')
 }
 
-writeFileSync(resolve(ROOT, 'release/_smoke-packaged.log'), output.join(''))
+writeFileSync(resolve(UNPACKED, '..', '_smoke-packaged.log'), output.join(''))
 process.exitCode = exitCode
 // 兜底：万一还有东西挂住事件循环
 setTimeout(() => process.exit(exitCode), 8000).unref()
