@@ -79,10 +79,10 @@
 ## 怎么验证
 
 ```bash
-npm run check            # 主护栏：lint:no-resize + typecheck + 241 条测试（约 5 分钟）
+npm run check            # 主护栏：lint:no-resize + typecheck + 249 条测试（约 7 分钟）
 npm test                 # 只跑测试
 npm run test:watch       # 测试 watch 模式
-npm run smoke            # 端到端：构建 + 启动 + 19 组检查 + 5 张截图（需加上面的环境变量）
+npm run smoke            # 端到端：构建 + 启动 + 21 组检查 + 5 张截图（需加上面的环境变量）
 npm run smoke:packaged   # 打包产物冒烟（先 npm run build）
 npm run measure:500      # 量 500 行列表的性能（上限 100 张之后主要留作参考）
 npm run fixtures         # 重新生成合成测试图
@@ -92,14 +92,16 @@ npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
 **验证的标准是「量结果」，不是「查定义」。** 这一条是被坑出来的：
 
 - 界面：量计算样式（尺寸/间距/字号/圆角/颜色）。只肉眼看，`T10-1` 和 `T11-2` 那两个坑都会漏过去。
+- **画质**：`fidelity.spec.ts` 把输出解回像素和原图逐点比。「看不出差别」不是主观判断，是 `均值 < 3/255、p99 <= 8` 这样的数（见 `docs/decisions.md` 的 T19-1）。黄金测试断言的 `quality >= 82` 只是**参数**，参数对不代表结果对。
 - 截图并排比对：硬指标覆盖不到对齐与配色。`npm run smoke` 会自动截 5 张到 `tests/fixtures/_shot-*.png`。
 - 零联网：用 CDP 监听请求，比「拔网线」严格。
 - 打包产物：真启动一次，验证原生模块从 `app.asar.unpacked` 加载。
 
-两个反复踩到的测试设计问题：
+三个反复踩到的测试设计问题：
 
 - **断言「0 个」之前先证明监听是活的**，否则是空断言，什么都没验。
 - **断言不要依赖持久化状态**（设置文件、缓存、上轮产物）。要断言不变量，不是具体数值。
+- **比对类测试先看已知样本对不对**（比如纯色图应该恰好是 0）。通道数对不上之类的 bug 不会让测试变红，只会让数字变得毫无意义。
 
 完整套路见用户级技能 `electron-cdp-acceptance`。
 

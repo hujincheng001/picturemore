@@ -679,6 +679,79 @@ async function main() {
     console.log(`  失败  ${e.message}`)
   }
 
+  // ---- 14b. 窗口尺寸适配（SPEC §10.3「窗口缩到最小尺寸不破版」）----
+  // 最小尺寸是 BrowserWindow 的 880x620（src/main/window.ts），内容区要再小一圈。
+  // 这里不写死内容区的像素值（取决于窗口边框与显示缩放），而是断言
+  // 「任何尺寸下都必须成立」的不变量：不横向溢出、窗口不超出视口、右栏仍有可用宽度。
+  console.log('\n[smoke] 窗口尺寸适配：')
+  const SIZES = [
+    { w: 864, h: 581, name: '最小窗口的内容区' },
+    { w: 980, h: 768, name: '设计尺寸' },
+    { w: 1440, h: 900, name: '大窗口' }
+  ]
+  try {
+    for (const size of SIZES) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: size.w,
+        height: size.h,
+        deviceScaleFactor: 1,
+        mobile: false
+      })
+      await sleep(250)
+
+      const r = await evaluate(`(() => {
+        const de = document.documentElement
+        const win = document.querySelector('#root > div')
+        const pane = document.querySelector('aside[aria-label="压缩设置"]')
+        const main = document.querySelector('main[aria-label="图片列表"]')
+        const box = (el) => el ? el.getBoundingClientRect() : null
+        const wb = box(win)
+        const pb = box(pane)
+        const mb = box(main)
+        // 把左栏滚到底，看 CTA 能不能露出来
+        if (pane) pane.scrollTop = pane.scrollHeight
+        const cta = pane ? [...pane.querySelectorAll('button')].find((b) => /^(压缩这|再压一次)/.test(b.textContent)) : null
+        const cb = box(cta)
+        const ctaVisible = cb !== null && cb.width > 0 && cb.top >= 0 && cb.bottom <= window.innerHeight
+        return {
+          docScrollW: de.scrollWidth,
+          docClientW: de.clientWidth,
+          winW: wb ? Math.round(wb.width) : null,
+          winH: wb ? Math.round(wb.height) : null,
+          paneW: pb ? Math.round(pb.width) : null,
+          paneScrollable: pane ? pane.scrollHeight > pane.clientHeight : null,
+          mainW: mb ? Math.round(mb.width) : null,
+          ctaVisible,
+          // 有没有元素横向溢出视口
+          overflowing: [...document.querySelectorAll('#root *')].filter((el) => {
+            const b = el.getBoundingClientRect()
+            return b.width > 0 && b.right > de.clientWidth + 1
+          }).length
+        }
+      })()`)
+
+      const noHScroll = r.docScrollW <= r.docClientW
+      const winFits = r.winW <= size.w && r.winH <= size.h
+      const mainUsable = r.mainW >= 300
+      const noOverflow = r.overflowing === 0
+
+      if (!noHScroll) failures.push(`${size.name}（${size.w}x${size.h}）出现横向滚动：${r.docScrollW} > ${r.docClientW}`)
+      if (!winFits) failures.push(`${size.name}（${size.w}x${size.h}）窗口超出视口：${r.winW}x${r.winH}`)
+      if (!mainUsable) failures.push(`${size.name}（${size.w}x${size.h}）右栏只剩 ${r.mainW}px，太窄`)
+      if (!noOverflow) failures.push(`${size.name}（${size.w}x${size.h}）有 ${r.overflowing} 个元素横向溢出`)
+      if (!r.ctaVisible) failures.push(`${size.name}（${size.w}x${size.h}）左栏滚到底后 CTA 仍不可见`)
+
+      console.log(
+        `  ${noHScroll && winFits && mainUsable && noOverflow && r.ctaVisible ? '通过' : '失败'}  ` +
+          `${size.name} ${size.w}x${size.h}：窗口 ${r.winW}x${r.winH}，左栏 ${r.paneW}，右栏 ${r.mainW}，` +
+          `左栏可滚=${r.paneScrollable}，CTA 可达=${r.ctaVisible}，溢出元素 ${r.overflowing}`
+      )
+    }
+  } catch (e) {
+    failures.push(`窗口尺寸适配检查失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
+  }
+
   // ---- 15. 输出到原图所在目录，原图必须原封不动 ----
   // SPEC §9：「用户选了原图所在目录 + 保持原格式 → resolveOutputPath 追加 (2)，绝不覆盖」。
   // 这条既有单测（naming.spec.ts 6 条），也有这里的端到端：拿哈希比对原图有没有被动过。
