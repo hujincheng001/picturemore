@@ -87,6 +87,7 @@ npm run smoke            # 端到端：构建 + 启动 + 20 组检查 + 5 张截
 npm run smoke:packaged   # 打包产物冒烟（先 npm run build）
 npm run smoke:packaged:cn # 同上，但在**中文 + 空格**路径下跑（NSIS 默认安装路径就带中文）
 npm run check:package    # 核查安装包内容：有没有源码/测试图/技能目录混进去
+npm run smoke:portable   # 免安装便携版（单文件自解压 exe）能不能起来干活
 npm run find:orphans     # 扫「导出了但没人引用」的符号
 npm run measure:500      # 量 500 行列表的性能（上限 100 张之后主要留作参考）
 npm run fixtures         # 重新生成合成测试图
