@@ -85,6 +85,7 @@ npm test                 # 只跑测试
 npm run test:watch       # 测试 watch 模式
 npm run smoke            # 端到端：构建 + 启动 + 20 组检查 + 5 张截图（需加上面的环境变量）
 npm run smoke:packaged   # 打包产物冒烟（先 npm run build）
+npm run smoke:packaged:cn # 同上，但在**中文 + 空格**路径下跑（NSIS 默认安装路径就带中文）
 npm run measure:500      # 量 500 行列表的性能（上限 100 张之后主要留作参考）
 npm run fixtures         # 重新生成合成测试图
 npm run verify:icc       # 单独验证 withIccProfile 会不会改像素

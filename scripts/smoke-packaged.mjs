@@ -238,6 +238,45 @@ try {
     }
   }
 
+  // ---- 单实例：第二次启动不该开出第二个窗口 ----
+  //
+  // `src/main/index.ts` 里有 `requestSingleInstanceLock()`，但从没验过。
+  // 两个实例同时在跑的话，两边会各写一份设置、还可能往同一个输出目录写同名文件，
+  // 而用户只会看到「怎么开了两个窗口」。
+  console.log('\n[packaged] 单实例：')
+  {
+    const second = spawn(EXE, [], { stdio: 'ignore', env })
+    const secondExit = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        second.kill()
+        resolve('timeout')
+      }, 10_000)
+      second.on('close', (code) => {
+        clearTimeout(timer)
+        resolve(code)
+      })
+    })
+
+    const exited = secondExit !== 'timeout'
+    if (!exited) failures.push('第二次启动没有立刻退出 —— 单实例锁没生效')
+    console.log(
+      `  ${exited ? '通过' : '失败'}  第二次启动立刻退出（退出码 ${String(secondExit)}）`
+    )
+
+    // 第一个实例必须还活着，而且只有一个窗口
+    const stillAlive = child.exitCode === null
+    if (!stillAlive) failures.push('第二次启动把第一个实例弄退了')
+    console.log(`  ${stillAlive ? '通过' : '失败'}  第一个实例仍然存活`)
+
+    const windowCount = await evaluate(
+      cdp,
+      `document.querySelectorAll('#root > div').length`
+    )
+    const oneWindow = windowCount === 1
+    if (!oneWindow) failures.push(`界面上出现了 ${windowCount} 个窗口根节点`)
+    console.log(`  ${oneWindow ? '通过' : '失败'}  界面上仍只有一个窗口（${windowCount}）`)
+  }
+
   cdp.close()
   exitCode = failures.length === 0 ? 0 : 1
 } catch (e) {

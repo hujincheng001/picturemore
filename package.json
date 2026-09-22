@@ -24,7 +24,8 @@
     "check": "npm run lint:no-resize && npm run lint:renderer-boundary && npm run typecheck && npm test",
     "lint:renderer-boundary": "node scripts/check-renderer-boundary.mjs",
     "find:orphans": "node scripts/find-orphans.mjs",
-    "smoke:packaged:cn": "node scripts/smoke-packaged-cn.mjs"
+    "smoke:packaged:cn": "node scripts/smoke-packaged-cn.mjs",
+    "check:package": "node scripts/check-package-content.mjs"
   },
   "dependencies": {
     "heic-decode": "^2.1.0",
