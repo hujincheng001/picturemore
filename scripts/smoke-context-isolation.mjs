@@ -12,7 +12,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, resolve } from 'node:path'
@@ -536,6 +536,136 @@ async function main() {
     console.log(`\n[smoke] 截图跳过：${e.message}`)
   }
 
+  // ---- 10b. 滑块联动（SPEC §7：拖动只改前端，预估量实时重算）----
+  //
+  // 之前冒烟从来没动过滑块，只验了初始状态 —— 于是「预估量跟不跟着变」
+  // 和「质量提示的四态切不切」都没被验过。这两条都是 SPEC §7 的明文要求。
+  console.log('\n[smoke] 滑块联动：')
+  try {
+    /**
+     * 设置滑块的值。
+     *
+     * React 受控输入必须走原生 setter 再派发事件 —— 直接改 `slider.value`
+     * React 收不到（它比对的是自己记的旧值，看到没变就不重渲）。
+     */
+    const setSlider = async (v) => {
+      await evaluate(`(() => {
+        const s = document.querySelector('input[type="range"]')
+        if (!s) return false
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+        setter.call(s, '${v}')
+        s.dispatchEvent(new Event('input', { bubbles: true }))
+        s.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      })()`)
+      await sleep(150)
+    }
+
+    /** 读「大数字 / 预估量 / 质量提示」三处 */
+    const readPreview = () =>
+      evaluate(`(() => {
+        const pane = document.querySelector('aside[aria-label="压缩设置"]')
+        if (!pane) return null
+        // 大数字是 <output>，左栏里只有这一个
+        const big = pane.querySelector('output')
+        // 「34.2 MB → 约 12.0 MB」这一行
+        const est = [...pane.querySelectorAll('p')].find((el) => (el.textContent || '').includes('约'))
+        // 质量提示靠 data-note-kind 认（按文案或样式找都太脆）
+        const note = pane.querySelector('p[data-note-kind]')
+        return {
+          big: big ? (big.textContent || '').trim() : null,
+          est: est ? est.textContent.replace(/\\s+/g, ' ').trim() : null,
+          noteKind: note ? note.getAttribute('data-note-kind') : null,
+          note: note ? note.textContent.trim() : null,
+          noteColor: note ? getComputedStyle(note).color : null
+        }
+      })()`)
+
+    /** 把「34.2 MB → 约 12.0 MB」解析成字节数 */
+    const parsePair = (text) => {
+      const m = /([\d.]+)\s*(MB|KB)\s*→\s*约\s*([\d.]+)\s*(MB|KB)/.exec(text ?? '')
+      if (m === null) return null
+      const toBytes = (n, unit) => Number(n) * (unit === 'MB' ? 1024 * 1024 : 1024)
+      return { total: toBytes(m[1], m[2]), out: toBytes(m[3], m[4]) }
+    }
+
+    /*
+     * 基准用**真实字节数**，不用界面上显示的「82 KB」。
+     *
+     * 显示值本身是四舍五入过的（MB 一位小数、KB 取整），拿它当分母的话，
+     * 分子分母的舍入会叠加 —— 实测在 80% 那档叠出 2.4% 的「偏差」，
+     * 而公式其实一分不差。基准取真值，容差就只剩输出那一侧的舍入。
+     */
+    const actualTotal = DROP_FILES.reduce((n, p) => n + statSync(p).size, 0)
+
+    const seen = []
+    for (const p of [20, 70, 80]) {
+      await setSlider(p)
+      const r = await readPreview()
+      if (r === null) throw new Error('读不到左栏的预览')
+      seen.push({ p, ...r })
+
+      const bigOk = r.big === `${p}%`
+      if (!bigOk) failures.push(`滑块设成 ${p}% 时大数字是「${r.big}」`)
+
+      const pair = parsePair(r.est)
+      if (pair === null) {
+        failures.push(`预估量读不出来：「${r.est}」`)
+      } else {
+        // 预估 = 总量 x (1 - p/100)。容差 = 显示精度的一半
+        // （MB 保留一位小数 -> 0.05MB；KB 取整 -> 0.5KB）
+        const want = actualTotal * (1 - p / 100)
+        const tol = want >= 1024 * 1024 ? 0.05 * 1024 * 1024 : 512
+        const diff = Math.abs(pair.out - want)
+        const estOk = diff <= tol
+        if (!estOk) {
+          failures.push(
+            `${p}% 的预估量不对：显示 ${r.est}（${pair.out} 字节），按公式应是 ${Math.round(want)} 字节，差 ${Math.round(diff)}`
+          )
+        }
+        console.log(
+          `  ${bigOk && estOk ? '通过' : '失败'}  ${p}%：${r.big}，预估 ${r.est}` +
+            `（真值 ${Math.round(want)} 字节，差 ${Math.round(diff)}，容差 ${tol}）`
+        )
+      }
+    }
+
+    // 质量提示的四态：70% 是安全线，越过它才该出琥珀色（AGENTS.md 硬性约束）
+    const byP = new Map(seen.map((s) => [s.p, s]))
+    const noteKindOk =
+      byP.get(20)?.noteKind === 'promise' &&
+      byP.get(70)?.noteKind === 'promise' &&
+      byP.get(80)?.noteKind === 'over-line'
+    if (!noteKindOk) {
+      failures.push(
+        `质量提示的态不对：20% -> ${byP.get(20)?.noteKind}，` +
+          `70% -> ${byP.get(70)?.noteKind}，80% -> ${byP.get(80)?.noteKind}（期望 promise / promise / over-line）`
+      )
+    }
+    console.log(
+      `  ${noteKindOk ? '通过' : '失败'}  提示态随滑块切换（20%→${byP.get(20)?.noteKind}，` +
+        `70%→${byP.get(70)?.noteKind}，80%→${byP.get(80)?.noteKind}）`
+    )
+
+    // 琥珀色只在警示态出现 —— 全站唯一有彩色
+    const amber = seen.filter((s) => /rgb\(138, 91, 0\)/.test(s.noteColor ?? ''))
+    const amberOk = amber.length === 1 && amber[0]?.p === 80
+    if (!amberOk) {
+      failures.push(
+        `琥珀色只该在越过 70% 时出现，实际出现在 ${amber.map((a) => a.p + '%').join(', ') || '（无）'}`
+      )
+    }
+    console.log(`  ${amberOk ? '通过' : '失败'}  琥珀色只在越过 70% 时出现（${amber.map((a) => a.p + '%').join(', ') || '无'}）`)
+    console.log(`        80% 的提示：${byP.get(80)?.note ?? '(空)'}`)
+    console.log(`        70% 的提示：${byP.get(70)?.note ?? '(空)'}`)
+
+    // 复位，后面的跑批与截图都按默认值走
+    await setSlider(65)
+  } catch (e) {
+    failures.push(`滑块联动检查失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
+  }
+
   // ---- 11. 跑一批，然后校验输出文件 ----
   // 这是 SPEC §10.2 的那条端到端冒烟：点 CTA → 等完成 → 断言输出目录里有文件
   // 且宽高与原图一致。承诺二（尺寸不变）在这里得到端到端的验证。
@@ -548,6 +678,36 @@ async function main() {
       return true
     })()`)
     if (!clicked) throw new Error('找不到 CTA 按钮')
+
+    /*
+     * 处理中那一态（SPEC §8.4）：文案变成「处理中 i / N」，且按钮必须禁用。
+     *
+     * 这一态只在跑批期间存在，很容易漏验 —— 原来冒烟只验了默认态
+     * （`压缩这 N 张`）和跑完之后的点击，中间这一段是空白的。
+     * 禁用态尤其重要：不禁用的话用户可以重复点，同一批会被跑两遍。
+     */
+    let runningSeen = null
+    for (let i = 0; i < 60; i++) {
+      const r = await evaluate(`(() => {
+        const cta = [...document.querySelectorAll('aside button')].find((b) => /^(压缩这|处理中|再压一次)/.test(b.textContent))
+        return cta ? { text: cta.textContent.trim(), disabled: cta.disabled } : null
+      })()`)
+      if (r !== null && /^处理中/.test(r.text)) {
+        runningSeen = r
+        break
+      }
+      await sleep(80)
+    }
+    if (runningSeen === null) {
+      failures.push('跑批期间没观察到「处理中 i / N」这一态')
+      console.log('  失败  没观察到处理中态')
+    } else {
+      const labelOk = /^处理中 \d+ \/ 3$/.test(runningSeen.text)
+      if (!labelOk) failures.push(`处理中的文案不对：「${runningSeen.text}」`)
+      if (!runningSeen.disabled) failures.push('处理中时 CTA 没有禁用，用户能重复点')
+      console.log(`  ${labelOk ? '通过' : '失败'}  处理中文案 = ${runningSeen.text}`)
+      console.log(`  ${runningSeen.disabled ? '通过' : '失败'}  处理中 CTA 已禁用`)
+    }
 
     // 等所有行落到终态
     let states = []
@@ -563,6 +723,18 @@ async function main() {
     console.log(`  行状态：${states.join(', ')}`)
     const bad = states.filter((s) => s === 'failed')
     if (bad.length > 0) failures.push(`端到端跑完有 ${bad.length} 张 failed`)
+
+    // 跑完之后 CTA 该变成「再压一次」（SPEC §8.4 的第三态）
+    const doneLabel = await evaluate(
+      `(() => {
+        const cta = [...document.querySelectorAll('aside button')].find((b) => /^(压缩这|处理中|再压一次)/.test(b.textContent))
+        return cta ? { text: cta.textContent.trim(), disabled: cta.disabled } : null
+      })()`
+    )
+    const doneOk = doneLabel !== null && doneLabel.text === '再压一次'
+    if (!doneOk) failures.push(`跑完之后 CTA 文案应是「再压一次」，实际「${doneLabel?.text ?? '(找不到)'}」`)
+    if (doneLabel !== null && doneLabel.disabled) failures.push('跑完之后 CTA 仍是禁用，用户没法再压一次')
+    console.log(`  ${doneOk ? '通过' : '失败'}  跑完后 CTA = ${doneLabel?.text ?? '(找不到)'}`)
 
     // 校验输出：每张输入都要有对应输出，且宽高一致
     const outDir = resolve(ROOT, 'tests/fixtures/processed')

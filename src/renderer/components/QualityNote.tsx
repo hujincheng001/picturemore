@@ -25,6 +25,10 @@ export function QualityNote({
 
   return (
     <p
+      // 把状态显式挂到 DOM 上：冒烟要验「琥珀色只在越过 70% 时出现」，
+      // 而按文案找元素太脆（文案会改），按样式找又分不出是哪一态。
+      // 行上的 data-state / data-reason 也是同一个用途。
+      data-note-kind={kind}
       className={[
         'text-1 leading-[1.75]',
         caution ? 'text-caution' : 'text-fg-3'
