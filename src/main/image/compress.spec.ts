@@ -244,3 +244,60 @@ describe('targetFormat', () => {
     expect(targetFormat(fake('avif'), 'keep')).toBe('jpeg')
   })
 })
+
+describe('PNG 到底能不能压动（2026-09-22 实测后补）', () => {
+  /*
+   * 起因：用户看到界面提示「PNG 体积基本压不下来」之后问「那其他格式转 PNG 是不是都压不动」。
+   *
+   * 实测（65% 档，全部 fixture 转 PNG）：
+   *   flat-solid.png    44KB ->  3KB  -93%
+   *   alpha-cutout.png  31KB ->  2KB  -95%
+   *   oriented-6.jpg     7KB ->  2KB  -78%   <- 输入是 JPG 也压得动
+   *   noise-hi.jpg    11.9MB -> 交原图
+   *   sample.webp      3.1MB -> 交原图
+   *
+   * 分界线是**颜色数**不是输入格式。原提示说「基本压不下来」是错的，
+   * 而截图与纯色图恰恰是「发不出去的图」里很大的一类 —— 那句话会直接劝退这部分用户。
+   *
+   * 这里把「低色数转 PNG 能大幅压缩」这条反直觉的事实钉住。
+   */
+  it(
+    '低色数图转 PNG 能压掉大半（哪怕输入是 JPG）',
+    async () => {
+      // oriented-6.jpg 是 JPG，但它是低色数的 —— 输入格式不是判据，色数才是
+      const buf = file('oriented-6.jpg')
+      const src = await probe(buf)
+      expect(src.format).toBe('jpeg')
+
+      const { result } = await compressOne({
+        buf,
+        shrinkPercent: 65,
+        outputFormat: 'png',
+        probe: src
+      })
+
+      expect(result.format).toBe('png')
+      expect(result.keptOriginal, '这张图转 PNG 不该压不动').toBe(false)
+      const saved = Math.round((1 - result.bytes / buf.length) * 100)
+      expect(saved, '只压掉了 ' + saved + '%').toBeGreaterThan(70)
+    },
+    120_000
+  )
+
+  it(
+    '纯色图转 PNG 也能压掉大半',
+    async () => {
+      const buf = file('flat-solid.png')
+      const src = await probe(buf)
+      const { result } = await compressOne({
+        buf,
+        shrinkPercent: 65,
+        outputFormat: 'png',
+        probe: src
+      })
+      expect(result.keptOriginal).toBe(false)
+      expect(1 - result.bytes / buf.length).toBeGreaterThan(0.7)
+    },
+    120_000
+  )
+})
