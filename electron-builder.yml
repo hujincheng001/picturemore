@@ -42,8 +42,15 @@ npmRebuild: false
 win:
   target:
     - nsis
+    # 免安装的单文件 exe。双击就跑，不用装、不留注册表项。
+    # 代价：每次启动会先自解压到临时目录，比装好的慢一两秒。
+    - portable
   artifactName: "${productName}-${version}-setup.${ext}"
   icon: build/icon.ico
+
+# 便携版的产物单独命名，别和安装包混在一起分不清
+portable:
+  artifactName: "${productName}-${version}-便携版.${ext}"
 
 nsis:
   oneClick: false
