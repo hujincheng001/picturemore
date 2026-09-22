@@ -955,6 +955,63 @@ async function main() {
       if (!ok) failures.push(`滑块不应该有外框（原型的焦点环在拇指上）：outline=${sliderFocused.outline}`)
       console.log(`  ${ok ? '通过' : '失败'}  滑块外框已按原型去掉（outline: ${sliderFocused.outline}）`)
     }
+
+    // ---- 格式选项的 radiogroup 键盘模式 ----
+    //
+    // 这里量的是**行为**，不是有没有写 role。之前只有 role 没有行为：
+    // 四个选项全进 Tab 序列、方向键毫无反应，而注释却写着方向键能用。
+    const rg = await evaluate(`(() => {
+      const radios = [...document.querySelectorAll('[role="radio"]')]
+      return {
+        count: radios.length,
+        tabbable: radios.filter((r) => r.tabIndex === 0).length,
+        checked: radios.findIndex((r) => r.getAttribute('aria-checked') === 'true')
+      }
+    })()`)
+
+    const oneStop = rg.tabbable === 1
+    if (!oneStop) failures.push(`radiogroup 应只有一个 Tab 停靠点，实际 ${rg.tabbable} 个`)
+    console.log(`  ${oneStop ? '通过' : '失败'}  整组一个 Tab 停靠点（${rg.tabbable} / ${rg.count}）`)
+
+    // 把焦点放到选中项，按方向键，看选中项与焦点是否一起移动
+    const moved = await evaluate(
+      `(async () => {
+        const radios = [...document.querySelectorAll('[role="radio"]')]
+        const checked = radios.find((r) => r.getAttribute('aria-checked') === 'true')
+        if (!checked) return null
+        checked.focus()
+        const before = radios.indexOf(checked)
+        return { before, total: radios.length }
+      })()`
+    )
+
+    if (moved !== null) {
+      for (const type of ['rawKeyDown', 'keyUp']) {
+        await cdp.send('Input.dispatchKeyEvent', {
+          type,
+          windowsVirtualKeyCode: 39,
+          nativeVirtualKeyCode: 39,
+          code: 'ArrowRight',
+          key: 'ArrowRight'
+        })
+      }
+      await sleep(120)
+      const after = await evaluate(`(() => {
+        const radios = [...document.querySelectorAll('[role="radio"]')]
+        return {
+          checked: radios.findIndex((r) => r.getAttribute('aria-checked') === 'true'),
+          focused: radios.indexOf(document.activeElement)
+        }
+      })()`)
+
+      const expected = (moved.before + 1) % moved.total
+      const selOk = after.checked === expected
+      const focusOk = after.focused === expected
+      if (!selOk) failures.push(`方向键没有移动选中项：${moved.before} -> ${after.checked}（期望 ${expected}）`)
+      if (!focusOk) failures.push(`方向键没有移动焦点：期望落在第 ${expected} 项，实际 ${after.focused}`)
+      console.log(`  ${selOk ? '通过' : '失败'}  方向键移动选中项（${moved.before} -> ${after.checked}）`)
+      console.log(`  ${focusOk ? '通过' : '失败'}  方向键同时移动焦点（落在第 ${after.focused} 项）`)
+    }
   } catch (e) {
     failures.push(`键盘检查失败：${e.message}`)
     console.log(`  失败  ${e.message}`)
