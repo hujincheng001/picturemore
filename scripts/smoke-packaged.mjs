@@ -15,7 +15,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
@@ -35,6 +35,19 @@ const UNPACKED = resolve(ROOT, process.argv[2] ?? 'release/win-unpacked')
 const EXE = resolve(UNPACKED, '图压压.exe')
 const PORT = 9444
 const OUT_DIR = resolve(UNPACKED, '..', '_smoke-out')
+
+/**
+ * 应用设置文件。
+ *
+ * task:start 会把存放位置落盘（主进程的行为，产品设计如此）。所以打包冒烟跑完
+ * 会在用户设置里留下 _smoke-out —— 下一次跑开发冒烟时，应用就会带着这个陈旧值
+ * 起来，第一批产物写到别处去，校验报「输出目录里没有产物」，看起来像压缩坏了。
+ *
+ * 所以跑之前拍快照，跑完原样放回。副作用必须清干净。
+ */
+const APP_SETTINGS = resolve(process.env['APPDATA'] ?? '', 'picturemore', 'settings.json')
+const settingsExisted = existsSync(APP_SETTINGS)
+const settingsBefore = settingsExisted ? readFileSync(APP_SETTINGS, 'utf-8') : null
 const FIXTURES = ['oriented-6.jpg', 'flat-solid.png', 'iphone-portrait.heic'].map((f) =>
   resolve(ROOT, 'tests/fixtures', f)
 )
@@ -221,6 +234,10 @@ try {
     }
   }
 }
+
+// 把设置放回原样（见 APP_SETTINGS 的说明）
+if (settingsExisted && settingsBefore !== null) writeFileSync(APP_SETTINGS, settingsBefore)
+else rmSync(APP_SETTINGS, { force: true })
 
 if (failures.length > 0) {
   console.error(`\n[packaged] 失败 ${failures.length} 项：`)

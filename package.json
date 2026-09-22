@@ -1,6 +1,6 @@
 {
   "name": "picturemore",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "本地图片压缩工具，图片内容永不离开你的电脑",
   "main": "./out/main/index.js",
   "author": "pictureMore",
