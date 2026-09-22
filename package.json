@@ -23,7 +23,8 @@
     "measure:500": "electron-vite build && node scripts/measure-500.mjs",
     "check": "npm run lint:no-resize && npm run lint:renderer-boundary && npm run typecheck && npm test",
     "lint:renderer-boundary": "node scripts/check-renderer-boundary.mjs",
-    "find:orphans": "node scripts/find-orphans.mjs"
+    "find:orphans": "node scripts/find-orphans.mjs",
+    "smoke:packaged:cn": "node scripts/smoke-packaged-cn.mjs"
   },
   "dependencies": {
     "heic-decode": "^2.1.0",
