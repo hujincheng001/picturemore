@@ -73,13 +73,14 @@
 1. **绝不调用 `.resize()`。** 本产品承诺尺寸不变。`npm run lint:no-resize` 会拦截。
 2. **每次输出后断言宽高与输入一致。** 不一致就抛 `DIMENSION_CHANGED`，不写文件。
 3. **渲染进程不碰文件系统。** `contextIsolation: true` + `nodeIntegration: false` 永远不动，所有文件操作走 IPC。
+   `npm run lint:renderer-boundary` 会拦下渲染层引用 `electron` / `node:*` / `sharp` 的写法。
 
 ---
 
 ## 怎么验证
 
 ```bash
-npm run check            # 主护栏：lint:no-resize + typecheck + 249 条测试（约 7 分钟）
+npm run check            # 主护栏：两条 lint + typecheck + 302 条测试（约 7 分钟）
 npm test                 # 只跑测试
 npm run test:watch       # 测试 watch 模式
 npm run smoke            # 端到端：构建 + 启动 + 21 组检查 + 5 张截图（需加上面的环境变量）
@@ -113,7 +114,7 @@ npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
 |---|---|
 | 依赖 | 只有 `sharp`、`heic-decode`、`zustand` 三个运行时依赖。**不要加新的**。特别地：不用 `nanoid`（用 `crypto.randomUUID()`）、不用 `electron-store`、不用 `react-router-dom`、不装图标库 |
 | 图标 | 全站零图标、零 emoji。交互靠文字 |
-| 文案 | 只能取自 `SPEC.md` §8.4 文案表，不得自造词。**`docs/decisions.md` 里记着三处 SPEC 没给文案的缺口**，不要自己编 |
+| 文案 | 只能取自 `SPEC.md` §8.4 文案表，不得自造词。SPEC 没覆盖的地方**先补进 §8.4 再实现**，保持「文案只有一处来源」。2026-09-22 已把此前的缺口全部补齐 |
 | 标点 | 零 em-dash（`—` 和 `–` 都不行，中文里也不用"——"）。中黑点 `·` 每行最多一个 |
 | 圆角 | 只用 12 / 6 / 4 三个值 |
 | 字号 | 只用 12 / 15 / 20 / 36 四个值 |
@@ -156,9 +157,9 @@ npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
 - 打包：NSIS 安装包 115MB，包内容核查干净
 - 测试 241 条（含批处理编排、设置容错、路径分隔符、上限截断）
 
-### 还挂着的（需要用户拍板，不要自己决定）
+### 还挂着的
 
-- **Android 的 sRGB HEIC 会被错标成 P3**（画面偏艳）。修法已明确，但**手上没有 Android HEIC 样张，改不了就没法验**，所以没动
-- **三处 SPEC 没给文案**：「文件不存在 / 无读权限」、SPEC §9 的两句行内文案（「这张已经压到底了」/「质量已到下限，只压到 {x}」）、「空文件夹给提示」
-- **`TokenProbe` 要不要留在渲染树里**（6 个隐藏 div，是「变量定义了但工具类没生成」这类问题的唯一抓手）
+- **Android 的 sRGB HEIC 会被错标成 P3**（画面偏艳）。修法已明确（读容器里的 ICC，若是 sRGB 就不挂 P3），但**手上没有 Android HEIC 样张，改不了就没法验**，所以没动。判据逻辑本身可以用现有的 Apple P3 与 sharp 内置 sRGB 两份真实 ICC 做单测，缺的只是「Android 机型确实带 sRGB ICC」这个数据事实
+- **10-bit HEIC 未实测**：两张 fixture 都是 8-bit。`heic-decode` 的 `display()` 固定输出 8-bit RGBA，所以遇到 10-bit 源也不会崩，但没验过
 
+**2026-09-22 已定掉的（原「需要拍板」项）**：单批上限 100 张、批次错误文案、undershot 行内文案与位置、失败行原因文案、空拖入提示、`revealInFolder` 孤儿通道、`TokenProbe` 保留。全部记在 `docs/decisions.md` 的 T18 / T21 / T22。

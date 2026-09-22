@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import type { ReasonCode } from '../../shared/reasons'
 import { batchErrorText, reasonText } from './reason'
 
 /**
@@ -21,10 +22,34 @@ describe('reasonText', () => {
     expect(reasonText('HEIC_DECODE_FAILED')).toBe('这台机器上的 HEIC 解码器打不开这张图')
   })
 
-  it('SPEC 没给文案的保持为空，不要自己编', () => {
-    // 这几条要等用户确认文案。填进去会让「不猜」这条规矩失效
-    for (const code of ['ENOENT', 'EACCES', 'NOT_A_FILE', 'TIMEOUT', 'WRITE_FAILED', 'UNKNOWN']) {
-      expect(reasonText(code), `${code} 不该有文案，SPEC 没给`).toBeNull()
+  it('2026-09-22 补齐的那几条也都有文案', () => {
+    // 原来这几条返回 null，结果是失败行的体积格**空白** —— 一行既没体积也没原因，
+    // 用户只知道「这张不行」。静默比说得不够准更糟
+    expect(reasonText('ENOENT')).toBe('找不到这个文件')
+    expect(reasonText('EACCES')).toBe('没有读取权限')
+    expect(reasonText('NOT_A_FILE')).toBe('这不是文件')
+    expect(reasonText('TIMEOUT')).toBe('处理超时了')
+    expect(reasonText('WRITE_FAILED')).toBe('写不进去')
+    expect(reasonText('DISK_FULL')).toBe('磁盘满了')
+  })
+
+  it('**每一个原因码都有文案**，不留空白格', () => {
+    // 这条是不变量，比逐个断言具体文字更能兜住「新加了原因码却忘了配文案」
+    const all: ReasonCode[] = [
+      'ENOENT',
+      'EACCES',
+      'NOT_A_FILE',
+      'CORRUPT',
+      'HEIC_DECODE_FAILED',
+      'TIMEOUT',
+      'WRITE_FAILED',
+      'DISK_FULL',
+      'UNKNOWN'
+    ]
+    for (const code of all) {
+      const text = reasonText(code)
+      expect(text, `${code} 没有文案，失败行会空着`).not.toBeNull()
+      expect((text ?? '').length, `${code} 的文案是空的`).toBeGreaterThan(0)
     }
   })
 
@@ -35,11 +60,23 @@ describe('reasonText', () => {
   })
 
   it('文案里没有 em-dash 与 emoji（写作纪律）', () => {
-    for (const code of ['CORRUPT', 'HEIC_DECODE_FAILED']) {
+    const all: ReasonCode[] = [
+      'ENOENT',
+      'EACCES',
+      'NOT_A_FILE',
+      'CORRUPT',
+      'HEIC_DECODE_FAILED',
+      'TIMEOUT',
+      'WRITE_FAILED',
+      'DISK_FULL',
+      'UNKNOWN'
+    ]
+    for (const code of all) {
       const text = reasonText(code) ?? ''
-      expect(text.includes('\u2014')).toBe(false)
-      expect(text.includes('\u2013')).toBe(false)
-      expect(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text)).toBe(false)
+      expect(text.includes('\u2014'), code).toBe(false)
+      expect(text.includes('\u2013'), code).toBe(false)
+      expect((text.match(/·/g) ?? []).length, code).toBeLessThanOrEqual(1)
+      expect(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(text), code).toBe(false)
     }
   })
 })

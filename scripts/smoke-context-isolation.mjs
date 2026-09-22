@@ -166,6 +166,26 @@ async function main() {
     return 1
   }
 
+  /*
+   * 起点必须是「没设置过存放位置」。
+   *
+   * 脚本开头删了设置文件，但那只保证磁盘上是干净的。如果上一轮跑的是打包冒烟
+   * （它把存放位置设成 release-xxx/_smoke-out 并落盘），应用就会带着一个陈旧的
+   * 存放位置起来，于是第一批产物写到别处去 —— 校验报「输出目录里没有产物」，
+   * 看起来像压缩坏了，其实只是起点不干净。
+   *
+   * 验收脚本的第一步应该是「把状态复位到已知起点」，而不是「假设环境是干净的」。
+   * 所以这里显式断言一次，不干净就当场停下并说清楚。
+   */
+  const outDirAtBoot = await evaluate(`window.pictureMore.getSettings().then((s) => s.outputDir)`)
+  if (outDirAtBoot !== null) {
+    console.error(
+      `[smoke] 起点不干净：存放位置是 ${String(outDirAtBoot)}，` +
+        '本该是「没设置过」。删掉 %APPDATA%\\picturemore\\settings.json 再跑。'
+    )
+    return 1
+  }
+
   // ---- 0. 全程监听网络请求（承诺一：运行时零联网）----
   // 比「拔网线」更严格：拔网线只能证明断网时能用，这里能证明**根本没有发出请求**。
   // 必须在任何交互之前打开，否则会漏掉早期的请求。

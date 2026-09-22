@@ -1,23 +1,26 @@
 import type { JSX } from 'react'
 import { COPY } from '../lib/copy'
 import { formatBytes } from '../lib/format'
+import { rowNote } from '../lib/note'
 import { reasonText } from '../lib/reason'
 import type { ImageItem } from '../lib/types'
 import s from './FileRow.module.css'
 
 /**
- * 对应原型 `.file`。一行只有文件名、体积、移除。移除是**文字**不是图标。
+ * 对应原型 `.file`。一行有文件名、体积、可选的提示、移除。移除是**文字**不是图标。
  *
- * 四种行的呈现：
+ * 五种行的呈现：
  *   pending / working  只显示原体积；working 整行降到 30% 不透明
  *   done               显示 `4.2 MB → 1.5 MB`，结果那一半淡入落位
- *   undershot          同上（体积确实变了，只是没到目标），另在 title 上说明
+ *   undershot          同上，另加一格提示（见下）
  *   failed             体积那一格换成原因文案；SPEC 没给文案的原因码只留 title
  *
- * ⚠️ SPEC §9 给「输出比原图还大」和「压不到目标体积」配了两句行内文案
- * （「这张已经压到底了」/「质量已到下限，只压到 {x}」），但**原型这一行没有位置放它们**
- * —— 44px 一行，只有文件名、体积、移除三格。原型是唯一视觉基准，不能自己加一栏。
- * 所以这里只把状态放在 title 上，不擅自改版式。见 docs/decisions.md 的 T12-2。
+ * **提示格只在有话说时才渲染**（`rowNote` 返回非 null）。没有提示的行仍是三格 ——
+ * 文件名那格是 `flex:1`，会吸收这点差异，体积与移除不会跳位。
+ *
+ * 关于版式：原型 `.file` 只有三格，没有提示的位置。但原型**只画了 happy path**，
+ * 「压不到目标」这个状态它从未覆盖，所以补一格不是偏离原型，是填原型没画的洞。
+ * 见 docs/decisions.md 的 T12-2 与 T22-1。
  */
 
 export interface FileRowProps {
@@ -30,6 +33,7 @@ export function FileRow({ item, onRemove }: FileRowProps): JSX.Element {
   const failed = item.state === 'failed' || !item.readable
   const done = item.state === 'done' || item.state === 'undershot'
   const failText = reasonText(item.reason)
+  const note = rowNote(item)
 
   return (
     <li
@@ -57,6 +61,9 @@ export function FileRow({ item, onRemove }: FileRowProps): JSX.Element {
           </>
         )}
       </span>
+
+      {/* 压不到目标时的行内说明。琥珀色 —— 全站唯一有彩色，只在「有件事你得知道」时出现 */}
+      {note !== null && <span className={s.note}>{note}</span>}
 
       <button
         type="button"

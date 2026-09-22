@@ -34,6 +34,8 @@ export interface PrimaryButtonProps {
   lastOutputDir: string | null
   /** 批次级错误的原因码。有值时底部那行换成错误提示 */
   error: string | null
+  /** 批次级提示（不是错误）。目前只有「拖进来的东西里没有可压缩的图」 */
+  notice: string | null
   onClick: () => void
 }
 
@@ -44,6 +46,7 @@ export function PrimaryButton({
   finished,
   lastOutputDir,
   error,
+  notice,
   onClick
 }: PrimaryButtonProps): JSX.Element {
   const label = running
@@ -55,8 +58,16 @@ export function PrimaryButton({
   // 没有图时不该能点。空列表时左栏整体隐藏，这里只是兜底
   const disabled = running || itemCount === 0
 
+  /*
+   * 底部那行的优先级：错误 > 提示 > 完成 > 常驻声明。
+   *
+   * 错误压过完成提示：一批被磁盘满中止时，先说「磁盘满了」比说「完成」有用得多。
+   * 提示压过完成提示：刚拖进来一个空文件夹，用户要的是「为什么没反应」，
+   * 而不是上一批的存放位置。
+   */
   const errorText = batchErrorText(error)
-  const foot = errorText ?? (lastOutputDir === null ? COPY.footer : COPY.doneTip(lastOutputDir))
+  const foot = errorText ?? notice ?? (lastOutputDir === null ? COPY.footer : COPY.doneTip(lastOutputDir))
+  const caution = errorText !== null
 
   return (
     <div className="mt-auto flex flex-col gap-3">
@@ -65,10 +76,10 @@ export function PrimaryButton({
       </button>
       {/*
         错误用琥珀 —— 全站唯一有彩色，只在「有件事你得知道」时出现。
-        底部声明与完成提示都是中性灰
+        普通提示与底部声明、完成提示都是中性灰
       */}
       <p
-        className={['text-center text-1', errorText === null ? 'text-fg-3' : 'text-caution'].join(' ')}
+        className={['text-center text-1', caution ? 'text-caution' : 'text-fg-3'].join(' ')}
         role={errorText === null ? undefined : 'status'}
       >
         {foot}

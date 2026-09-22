@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { reasonFromError } from '../../shared/reasons'
 import type { OutputFormat, StartTaskPayload, TaskDoneEvent, TaskProgressEvent } from '../../shared/types'
+import { COPY } from '../lib/copy'
 import { MAX_BATCH, takeWithinLimit } from '../lib/limit'
 import { defaultOutputDir } from '../lib/path'
 import type { ImageItem } from '../lib/types'
@@ -27,6 +28,8 @@ export interface AppState {
   items: ImageItem[]
   /** 最近一次加入时因为超过单批上限而被忽略的张数 */
   dropped: number
+  /** 批次级提示（不是错误）。目前只有「拖进来的东西里没有可压缩的图」 */
+  notice: string | null
   taskId: string | null
   running: boolean
 
@@ -62,6 +65,7 @@ export interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   items: [],
   dropped: 0,
+  notice: null,
   taskId: null,
   running: false,
   shrinkPercent: DEFAULT_SHRINK,
@@ -124,10 +128,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     const outputDir =
       prev.outputDir.length > 0 ? prev.outputDir : defaultOutputDir(paths[0] ?? '')
 
+    /*
+     * 一张都没加进来时必须说一声。空文件夹、或者只拖了 .txt 之类，
+     * 界面完全没反应的话用户只会以为程序卡了。
+     * 混在一堆图里被过滤掉的那些仍然不吭声 —— 那是「静默过滤」的本意。
+     */
+    const notice = accepted.length === 0 && paths.length > 0 ? COPY.emptyDrop : null
+
     set({
       items,
       outputDir,
       dropped: dropped + extra,
+      notice,
       lastOutputDir: null,
       finished: false,
       error: null
@@ -150,7 +162,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({
       items: s.items.filter((it) => it.id !== id),
       // 空出名额了，之前的「已忽略」提示就不再成立
-      dropped: 0
+      dropped: 0,
+      notice: null
     }))
   },
 
@@ -163,6 +176,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       items: [],
       dropped: 0,
+      notice: null,
       running: false,
       taskId: null,
       progress: 0,
@@ -205,7 +219,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       outputDir
     }
 
-    set({ running: true, taskId, progress: 0, finished: false, error: null })
+    set({ running: true, taskId, progress: 0, finished: false, error: null, notice: null })
     try {
       const r = await window.pictureMore.start(payload)
       // 启动前的失败走返回值（输出目录建不了 / 不可写）。

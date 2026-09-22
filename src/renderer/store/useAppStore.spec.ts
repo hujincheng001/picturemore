@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { ImageFileMeta, ProbeResponse, Settings } from '../../shared/types'
+import { COPY } from '../lib/copy'
 import { MAX_BATCH } from '../lib/limit'
 import type { ImageItem } from '../lib/types'
 import { useAppStore } from './useAppStore'
@@ -84,6 +85,7 @@ function install(probeResult?: Partial<ProbeResponse>): void {
   useAppStore.setState({
     items: [],
     dropped: 0,
+    notice: null,
     taskId: null,
     running: false,
     shrinkPercent: 65,
@@ -428,5 +430,57 @@ describe('removeItem', () => {
     useAppStore.getState().removeItem('a')
     expect(useAppStore.getState().items).toEqual([])
     expect(useAppStore.getState().dropped).toBe(0)
+  })
+})
+
+describe('拖进来的东西里没有可压缩的图', () => {
+  it('一张都没加进来时给提示', () => {
+    // 空文件夹、或者只拖了 .txt 之类。界面完全没反应的话用户只会以为程序卡了
+    install({ metas: [], dropped: 0 })
+    return useAppStore.getState().addPaths(['D:\空文件夹']).then(() => {
+      expect(useAppStore.getState().notice).toBe(COPY.emptyDrop)
+      expect(useAppStore.getState().items).toEqual([])
+    })
+  })
+
+  it('加进来一些时不给提示（混着的非图片仍然静默过滤）', () => {
+    install({ metas: [meta('a')] })
+    return useAppStore.getState().addPaths(['D:\有图\a.jpg', 'D:\有图\note.txt']).then(() => {
+      expect(useAppStore.getState().notice).toBeNull()
+    })
+  })
+
+  it('空数组不触发提示', () => {
+    // 没拖东西当然不该说「没有可压缩的图片」
+    return useAppStore.getState().addPaths([]).then(() => {
+      expect(useAppStore.getState().notice).toBeNull()
+    })
+  })
+
+  it('开始跑批时提示让位', () => {
+    install()
+    useAppStore.setState({
+      notice: COPY.emptyDrop,
+      outputDir: 'D:\out',
+      items: [item('a')]
+    })
+    return useAppStore.getState().run().then(() => {
+      expect(useAppStore.getState().notice).toBeNull()
+    })
+  })
+
+  it('清空列表时提示让位', () => {
+    install()
+    useAppStore.setState({ notice: COPY.emptyDrop })
+    return useAppStore.getState().clear().then(() => {
+      expect(useAppStore.getState().notice).toBeNull()
+    })
+  })
+
+  it('移除一行时提示让位', () => {
+    install()
+    useAppStore.setState({ notice: COPY.emptyDrop, items: [item('a')] })
+    useAppStore.getState().removeItem('a')
+    expect(useAppStore.getState().notice).toBeNull()
   })
 })

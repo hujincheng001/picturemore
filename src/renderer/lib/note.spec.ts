@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { noteFor, noteText, noteIsCaution } from './note'
+import { noteFor, noteText, noteIsCaution, rowNote } from './note'
 import { COPY } from './copy'
 
 describe('noteFor 的优先级', () => {
@@ -85,6 +85,52 @@ describe('文案的写作纪律', () => {
     for (const s of all) {
       // eslint-disable-next-line no-control-regex
       expect(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(s), `出现了 emoji：${s}`).toBe(false)
+    }
+  })
+})
+
+describe('rowNote：压不到目标时这一行该说什么', () => {
+  const base = { state: 'undershot', bytes: 1000 }
+
+  it('输出就是原文件时说「已经压到底了」', () => {
+    // keptOriginal 的定义就是返回原文件字节，两者语义等价
+    expect(rowNote({ ...base, outBytes: 1000 })).toBe(COPY.undershotKept)
+  })
+
+  it('压下去了但没到目标时报出占原图的百分比', () => {
+    expect(rowNote({ ...base, outBytes: 580 })).toBe(COPY.undershotFloor(58))
+    expect(rowNote({ ...base, outBytes: 1 })).toBe(COPY.undershotFloor(0))
+  })
+
+  it('百分比取整，不产出小数', () => {
+    // 1000 -> 333 是 33.3%
+    expect(rowNote({ ...base, outBytes: 333 })).toBe(COPY.undershotFloor(33))
+  })
+
+  it('其它状态没有行内提示', () => {
+    // done 是正常路径，不需要额外说明；failed 的原因已经在体积那格
+    for (const state of ['pending', 'working', 'done', 'failed']) {
+      expect(rowNote({ state, bytes: 1000, outBytes: 500 }), state).toBeNull()
+    }
+  })
+
+  it('还没跑完时没有提示', () => {
+    expect(rowNote({ state: 'undershot', bytes: 1000 })).toBeNull()
+  })
+
+  it('bytes 为 0 时不产出 NaN', () => {
+    // 读不了的图 bytes 是 0，不该走到这里；真走到了也不能显示「只压到 NaN%」
+    const text = rowNote({ state: 'undershot', bytes: 0, outBytes: 0 })
+    expect(text).not.toContain('NaN')
+  })
+
+  it('文案里没有 em-dash 与 emoji（写作纪律）', () => {
+    const texts = [COPY.undershotKept, COPY.undershotFloor(58)]
+    for (const t of texts) {
+      expect(t.includes('\u2014')).toBe(false)
+      expect(t.includes('\u2013')).toBe(false)
+      expect((t.match(/·/g) ?? []).length).toBeLessThanOrEqual(1)
+      expect(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(t)).toBe(false)
     }
   })
 })
