@@ -666,6 +666,112 @@ async function main() {
     console.log(`  失败  ${e.message}`)
   }
 
+  // ---- 10c. 悬停态与动效兜底 ----
+  //
+  // 两条都是明文要求但从没验过：
+  //   - DESIGN.md §5.2：悬停时「移除」由 opacity:0 变 1
+  //     （原来只验了隐藏探针 #probe-hover 的配色，没验真按钮的行为）
+  //   - AGENTS.md 硬性约束：任何动效都必须有 prefers-reduced-motion 兜底
+  console.log('\n[smoke] 悬停态与动效兜底：')
+  try {
+    const rowBox = await evaluate(`(() => {
+      const li = document.querySelector('main li')
+      const btn = li ? li.querySelector('button') : null
+      if (!li || !btn) return null
+      const b = li.getBoundingClientRect()
+      return {
+        x: Math.round(b.left + b.width / 2),
+        y: Math.round(b.top + b.height / 2),
+        opacity: getComputedStyle(btn).opacity
+      }
+    })()`)
+
+    if (rowBox === null) {
+      failures.push('找不到文件行或移除按钮')
+      console.log('  失败  找不到文件行')
+    } else {
+      // 默认：移除按钮隐身（原型如此，鼠标没进来之前不占视觉重量）
+      const idleOk = Number(rowBox.opacity) === 0
+      if (!idleOk) failures.push(`移除按钮默认应是 opacity:0，实际 ${rowBox.opacity}`)
+      console.log(`  ${idleOk ? '通过' : '失败'}  移除按钮默认隐身（opacity=${rowBox.opacity}）`)
+
+      // 悬停：真派发一次鼠标移动，再读计算样式
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: rowBox.x,
+        y: rowBox.y,
+        button: 'none'
+      })
+      await sleep(320) // 等过渡走完（0.14s）
+      const hovered = await evaluate(
+        `getComputedStyle(document.querySelector('main li button')).opacity`
+      )
+      const hoverOk = Number(hovered) === 1
+      if (!hoverOk) failures.push(`悬停时移除按钮应变成 opacity:1，实际 ${hovered}`)
+      console.log(`  ${hoverOk ? '通过' : '失败'}  悬停时移除按钮现身（opacity=${hovered}）`)
+
+      // 移开：回到隐身
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5, button: 'none' })
+      await sleep(320)
+      const away = await evaluate(
+        `getComputedStyle(document.querySelector('main li button')).opacity`
+      )
+      const awayOk = Number(away) === 0
+      if (!awayOk) failures.push(`鼠标移开后移除按钮应回到 opacity:0，实际 ${away}`)
+      console.log(`  ${awayOk ? '通过' : '失败'}  鼠标移开后回到隐身（opacity=${away}）`)
+    }
+
+    /*
+     * 动效兜底。
+     *
+     * 光看 CSS 里有没有 `@media (prefers-reduced-motion: reduce)` 是不够的 ——
+     * 那只能证明「写了」。这里真的把媒体特性模拟成 reduce，再读计算样式，
+     * 确认过渡与动画**实际**被停掉了。
+     */
+    await cdp.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+    })
+    await sleep(120)
+    const reduced = await evaluate(`(() => {
+      const li = document.querySelector('main li')
+      const btn = li ? li.querySelector('button') : null
+      const cta = document.querySelector('aside button')
+      if (!li || !btn) return null
+      return {
+        rowTransition: getComputedStyle(btn).transitionDuration,
+        ctaTransition: cta ? getComputedStyle(cta).transitionDuration : null,
+        animation: getComputedStyle(li).animationName
+      }
+    })()`)
+
+    if (reduced === null) {
+      failures.push('reduce 模式下读不到元素')
+      console.log('  失败  reduce 模式下读不到元素')
+    } else {
+      const noTransition =
+        /^0s/.test(reduced.rowTransition ?? '') &&
+        (reduced.ctaTransition === null || /^0s/.test(reduced.ctaTransition))
+      const noAnimation = reduced.animation === 'none'
+      if (!noTransition) {
+        failures.push(
+          `reduce 模式下过渡没停：移除按钮 ${reduced.rowTransition}，CTA ${reduced.ctaTransition}`
+        )
+      }
+      if (!noAnimation) failures.push(`reduce 模式下动画没停：${reduced.animation}`)
+      console.log(
+        `  ${noTransition ? '通过' : '失败'}  reduce 模式下过渡已停（${reduced.rowTransition} / ${reduced.ctaTransition}）`
+      )
+      console.log(`  ${noAnimation ? '通过' : '失败'}  reduce 模式下动画已停（animation-name: ${reduced.animation}）`)
+    }
+
+    // 复位，后面的截图与跑批按正常媒体特性走
+    await cdp.send('Emulation.setEmulatedMedia', { features: [] })
+    await sleep(80)
+  } catch (e) {
+    failures.push(`悬停与动效检查失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
+  }
+
   // ---- 11. 跑一批，然后校验输出文件 ----
   // 这是 SPEC §10.2 的那条端到端冒烟：点 CTA → 等完成 → 断言输出目录里有文件
   // 且宽高与原图一致。承诺二（尺寸不变）在这里得到端到端的验证。
@@ -690,10 +796,12 @@ async function main() {
     for (let i = 0; i < 60; i++) {
       const r = await evaluate(`(() => {
         const cta = [...document.querySelectorAll('aside button')].find((b) => /^(压缩这|处理中|再压一次)/.test(b.textContent))
-        return cta ? { text: cta.textContent.trim(), disabled: cta.disabled } : null
+        return {
+          cta: cta ? { text: cta.textContent.trim(), disabled: cta.disabled } : null,
+        }
       })()`)
-      if (r !== null && /^处理中/.test(r.text)) {
-        runningSeen = r
+      if (r.cta !== null && /^处理中/.test(r.cta.text)) {
+        runningSeen = r.cta
         break
       }
       await sleep(80)
@@ -707,6 +815,32 @@ async function main() {
       if (!runningSeen.disabled) failures.push('处理中时 CTA 没有禁用，用户能重复点')
       console.log(`  ${labelOk ? '通过' : '失败'}  处理中文案 = ${runningSeen.text}`)
       console.log(`  ${runningSeen.disabled ? '通过' : '失败'}  处理中 CTA 已禁用`)
+
+      /*
+       * 处理中的行整行降到 30% 不透明（DESIGN.md §5.2 的 .busy）。
+       *
+       * ⚠️ 不能一看到「处理中」就采样：`.file` 上有 `transition: opacity 0.22s`，
+       * 刚切过去时还是 1，读出来会误判成「样式没生效」。
+       * 所以在这一小段时间里连续采，取最小值 —— 过渡只要真的在走，总会落到 0.3。
+       */
+      let busyMin = null
+      for (let i = 0; i < 12; i++) {
+        const o = await evaluate(`(() => {
+          const w = document.querySelector('main li[data-state="working"]')
+          return w ? Number(getComputedStyle(w).opacity) : null
+        })()`)
+        if (o !== null) busyMin = busyMin === null ? o : Math.min(busyMin, o)
+        await sleep(60)
+      }
+
+      if (busyMin === null) {
+        // 这一批跑得太快，采样窗口里没有处理中的行 —— 跳过，不算失败
+        console.log('        没采到「处理中」的行（跑太快），跳过降透明度检查')
+      } else {
+        const busyOk = Math.abs(busyMin - 0.3) < 0.02
+        if (!busyOk) failures.push(`处理中的行应降到 opacity:0.3，实测最低 ${busyMin}`)
+        console.log(`  ${busyOk ? '通过' : '失败'}  处理中的行降到 30% 不透明（最低 opacity=${busyMin}）`)
+      }
     }
 
     // 等所有行落到终态
@@ -940,6 +1074,97 @@ async function main() {
     }
   } catch (e) {
     failures.push(`窗口尺寸适配检查失败：${e.message}`)
+    console.log(`  失败  ${e.message}`)
+  }
+
+  // ---- 14c. 处理中清空列表（SPEC §9：先 task:cancel 再清）----
+  //
+  // 这条路径一度**走不到**：清空按钮被写成了 `disabled={running}`，
+  // 而那是实现时自己加的 —— 原型里它从不禁用，DESIGN.md 也没提。
+  // 于是 SPEC §9 明文规定的 task:cancel 成了死代码。
+  // 现在按原型改回来了，这条冒烟就是它的守门人。
+  console.log('\n[smoke] 处理中清空列表：')
+  try {
+    // 先清干净，免得上一节留下的 100 行干扰
+    await evaluate(
+      `[...document.querySelectorAll('button')].find((b) => b.textContent === '清空列表')?.click()`
+    )
+    await sleep(300)
+
+    // 造一批「压得慢一点」的图：flat-solid 是 2000x1500，每张约 400ms。
+    // 用极小的图会因为跑太快而抓不到「处理中」的窗口。
+    const slowDir = resolve(ROOT, 'tests/fixtures/_slow30')
+    rmSync(slowDir, { recursive: true, force: true })
+    mkdirSync(slowDir, { recursive: true })
+    const solid = resolve(ROOT, 'tests/fixtures/flat-solid.png')
+    for (let i = 0; i < 30; i++) {
+      copyFileSync(solid, resolve(slowDir, `s-${String(i).padStart(3, '0')}.png`))
+    }
+
+    for (const type of ['dragEnter', 'dragOver', 'drop']) {
+      await cdp.send('Input.dispatchDragEvent', {
+        type,
+        x: 640,
+        y: 300,
+        data: { items: [], files: [slowDir], dragOperationsMask: 1 }
+      })
+    }
+    for (let i = 0; i < 60; i++) {
+      const n = await evaluate(`document.querySelectorAll('main li').length`)
+      if (n === 30) break
+      await sleep(200)
+    }
+
+    // 点 CTA 起跑，然后立刻清空
+    const started = await evaluate(`(() => {
+      const cta = [...document.querySelectorAll('aside button')].find((b) => /^压缩这/.test(b.textContent))
+      if (!cta) return false
+      cta.click()
+      return true
+    })()`)
+    if (!started) throw new Error('找不到 CTA')
+
+    // 等确实进入处理中，再清空 —— 否则可能清在开跑之前，验不到 cancel
+    let sawRunning = false
+    for (let i = 0; i < 30; i++) {
+      sawRunning = await evaluate(
+        `[...document.querySelectorAll('aside button')].some((b) => /^处理中/.test(b.textContent))`
+      )
+      if (sawRunning === true) break
+      await sleep(60)
+    }
+
+    const cleared = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll('button')].find((b) => b.textContent === '清空列表')
+      if (!btn) return 'no-button'
+      if (btn.disabled) return 'disabled'
+      btn.click()
+      return 'clicked'
+    })()`)
+
+    const clickable = cleared === 'clicked'
+    if (!clickable) {
+      failures.push(`处理中清空按钮不可点（${cleared}）—— SPEC §9 的 task:cancel 又走不到了`)
+    }
+    console.log(`  ${clickable ? '通过' : '失败'}  处理中清空按钮可点（${cleared}，进入过处理中=${sawRunning}）`)
+
+    await sleep(400)
+    const rightAfter = await evaluate(`document.querySelectorAll('main li').length`)
+    // 在跑的那几张跑完还会推进度 —— 它们找不到对应行，不该把行加回来
+    await sleep(1500)
+    const later = await evaluate(`document.querySelectorAll('main li').length`)
+
+    const emptyOk = rightAfter === 0
+    if (!emptyOk) failures.push(`清空后列表应立刻为空，实际 ${rightAfter} 行`)
+    console.log(`  ${emptyOk ? '通过' : '失败'}  清空后列表立刻为空（${rightAfter} 行）`)
+
+    const staysEmpty = later === 0
+    if (!staysEmpty) failures.push(`清空后又有 ${later} 行冒出来 —— 在跑的进度把行加回来了`)
+    console.log(`  ${staysEmpty ? '通过' : '失败'}  等 1.5s 后仍是空的（${later} 行）`)
+
+    rmSync(slowDir, { recursive: true, force: true })
+  } catch (e) {
+    failures.push(`处理中清空检查失败：${e.message}`)
     console.log(`  失败  ${e.message}`)
   }
 

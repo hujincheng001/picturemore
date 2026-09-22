@@ -80,8 +80,8 @@ export default function App(): JSX.Element {
             alphaCount={alphaCount}
             totalBytes={totalBytes}
             itemCount={items.length}
-            running={running}
             progress={progress}
+            running={running}
             finished={finished}
             lastOutputDir={lastOutputDir}
             error={error}
@@ -95,7 +95,6 @@ export default function App(): JSX.Element {
         <FileList
           items={items}
           dropped={dropped}
-          running={running}
           onPaths={(paths) => {
             void addPaths(paths)
           }}

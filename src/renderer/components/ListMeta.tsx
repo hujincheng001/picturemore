@@ -15,7 +15,6 @@ export interface ListMetaProps {
   totalBytes: number
   /** 最近一次加入时因为超过单批上限而被忽略的张数，0 表示没有 */
   dropped: number
-  running: boolean
   onClear: () => void
 }
 
@@ -23,7 +22,6 @@ export function ListMeta({
   count,
   totalBytes,
   dropped,
-  running,
   onClear
 }: ListMetaProps): JSX.Element {
   return (
@@ -39,8 +37,24 @@ export function ListMeta({
       <button
         type="button"
         onClick={onClear}
-        disabled={running}
-        className="border-b border-transparent text-1 text-fg-3 transition-colors duration-[140ms] enabled:hover:border-strong enabled:hover:text-fg disabled:cursor-default"
+        /*
+         * **不在处理中禁用。**
+         *
+         * 原来这里是 `disabled={running}` —— 那是我自己加的，原型里清空按钮
+         * 从来不禁用（`prototype/index.html` 的 `#clearBtn` 就是个普通 click），
+         * DESIGN.md 也没提禁用态。
+         *
+         * 而那个禁用把 SPEC §9 的「处理中清空列表 → 先 task:cancel 再清」
+         * 变成了**走不到的路径** —— `task:cancel` 从此成了死代码。
+         * 一条写在规格里、却因为另一处的擅自加码而永远执行不到的分支，
+         * 比没有这条规格更糟：它会让人以为已经处理过了。
+         *
+         * 清空期间的行为是安全的：cancelPending 跳过没开始的，在跑的几张跑完；
+         * 它们推的进度找不到对应行，applyProgress 按 itemId 匹配，匹配不到就什么也不做。
+         *
+         * 见 docs/decisions.md 的 T27-1。
+         */
+        className="border-b border-transparent text-1 text-fg-3 transition-colors duration-[140ms] hover:border-strong hover:text-fg"
       >
         {COPY.clearList}
       </button>

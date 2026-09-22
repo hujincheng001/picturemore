@@ -20,7 +20,6 @@ export interface FileListProps {
   items: ImageItem[]
   /** 最近一次加入时因为超过单批上限而被忽略的张数 */
   dropped: number
-  running: boolean
   /** 拖入或选择之后拿到的绝对路径，交给上层去 probe */
   onPaths: (paths: string[]) => void
   onPickFiles: () => void
@@ -31,7 +30,6 @@ export interface FileListProps {
 export function FileList({
   items,
   dropped,
-  running,
   onPaths,
   onPickFiles,
   onRemove,
@@ -73,7 +71,6 @@ export function FileList({
             count={items.length}
             totalBytes={totalBytes}
             dropped={dropped}
-            running={running}
             onClear={onClear}
           />
           <ul className={s.files}>
