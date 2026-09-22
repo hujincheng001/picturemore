@@ -3,6 +3,7 @@ import sharp from 'sharp'
 // 默认导入只拿到值绑定，取不到命名空间里的类型，所以 Metadata 必须具名导入。
 import type { Metadata } from 'sharp'
 import { canSharpDecodeHeic, decodeHeic } from './heic'
+import { iccProfileName } from './icc'
 import { ImageEngineError } from './verify'
 import type { ImageFormat, ProbeResult } from './types'
 
@@ -34,7 +35,7 @@ export async function probe(buf: Buffer): Promise<ProbeResult> {
       hasAlpha: m.hasAlpha ?? false,
       // HEIC 的方向在容器里（irot），sharp 读不到，但它已经把尺寸算成显示尺寸了
       orientation: m.orientation ?? 1,
-      icc: m.icc ? 'present' : null
+      icc: iccProfileName(m.icc ?? null)
     }
   } catch (e) {
     // 兜底：连容器头都读不了，可能是这台机器缺 HEIF 支持
@@ -50,7 +51,8 @@ export async function probe(buf: Buffer): Promise<ProbeResult> {
         // 这里按"无 alpha"处理，避免把不透明的图误判成需要拍平
         hasAlpha: false,
         orientation: 1,
-        icc: null
+        // heic-decode 走的是 raw 路径，读不到源文件里的 ICC
+        icc: 'none'
       }
     } catch {
       throw new ImageEngineError('PROBE_FAILED', `读不出这张图：${(e as Error).message}`)

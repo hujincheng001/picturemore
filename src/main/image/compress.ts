@@ -5,6 +5,7 @@ import type { EncodeInput, EncodeOptions } from './encode'
 import { MAX_ATTEMPTS, bestAttempt, nextQuality, qualityFloor, targetBytes } from './plan'
 import { assertSameDimensions } from './verify'
 import { canSharpDecodeHeic, decodeHeic } from './heic'
+import { classifyIccName, shouldTagAsP3 } from './icc'
 import type { Attempt, CompressResult, OutputFormat, ProbeResult } from './types'
 
 export interface CompressInput {
@@ -82,7 +83,7 @@ export async function compressOne(input: CompressInput): Promise<CompressOutput>
     // heic-decode 不做色彩管理，解出的像素是原生 P3 数值却没有标签（M0-3）。
     // 补挂 sharp 内置的 p3，实测色彩等价（原色矩阵与 Apple 的原厂 profile 逐位相同）
     // 且不转换像素（平均偏差 0.070/255，见 scripts/verify-icc-attach.mjs）。
-    tagAsP3: useRaw,
+    tagAsP3: useRaw && shouldTagAsP3(classifyIccName(src.icc)),
     // JPG 没有透明通道。SPEC §4 规定拍平到白底
     flattenTo: format === 'jpeg' && src.hasAlpha ? '#FFFFFF' : null
   }

@@ -45,7 +45,7 @@
 |---|---|
 | M0-1 | sharp 预编译版能读 HEIC 容器头，但解不了像素 |
 | M0-2 | `heic-decode` 返回的 raw **已经应用过方向**，再写 orientation 标签会二次旋转 |
-| M0-3 | libheif-js 不带色彩管理，需要补挂 P3 标签 |
+| M0-3 | libheif-js 不带色彩管理，需要补挂 P3 标签；但**只在源不是 sRGB 时挂**（T23-1） |
 | M0-4 | metadata 的正确写法是 `keepIccProfile().withExif({})`，**绝不能用 `withMetadata()`** |
 | T6-1 | 验证「有没有动像素」必须用无损格式，有损编码的噪声会淹掉信号 |
 | T10-1 | Tailwind v4 的工具类在 `@layer utilities`，**无层级的 CSS 永远压过它** |
@@ -155,11 +155,12 @@ npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
 - 全链路：拖拽 → probe → 压缩 → 写盘 → 逐行进度，端到端跑通
 - 单批上限 100 张，超出的如实报出「（已忽略 N 张）」
 - 打包：NSIS 安装包 115MB，包内容核查干净
-- 测试 241 条（含批处理编排、设置容错、路径分隔符、上限截断）
+- 测试 302 条（含批处理编排、设置容错、路径分隔符、上限截断、像素保真度、ICC 识别）
+- 两条 lint 护栏：`lint:no-resize`（禁改像素尺寸的调用）与 `lint:renderer-boundary`（禁渲染层引用 electron / node:* / sharp）
+- Android 的 sRGB HEIC 不再被错标成 P3（判据已单测，用三份真实 profile 验的）
 
 ### 还挂着的
 
-- **Android 的 sRGB HEIC 会被错标成 P3**（画面偏艳）。修法已明确（读容器里的 ICC，若是 sRGB 就不挂 P3），但**手上没有 Android HEIC 样张，改不了就没法验**，所以没动。判据逻辑本身可以用现有的 Apple P3 与 sharp 内置 sRGB 两份真实 ICC 做单测，缺的只是「Android 机型确实带 sRGB ICC」这个数据事实
 - **10-bit HEIC 未实测**：两张 fixture 都是 8-bit。`heic-decode` 的 `display()` 固定输出 8-bit RGBA，所以遇到 10-bit 源也不会崩，但没验过
 
 **2026-09-22 已定掉的（原「需要拍板」项）**：单批上限 100 张、批次错误文案、undershot 行内文案与位置、失败行原因文案、空拖入提示、`revealInFolder` 孤儿通道、`TokenProbe` 保留。全部记在 `docs/decisions.md` 的 T18 / T21 / T22。

@@ -15,6 +15,7 @@ export interface ProbeResult {
   bytes: number
   hasAlpha: boolean
   orientation: number
+  /** 源文件自带 ICC 的 profile 名，如 'Display P3' / 'sRGB'（SPEC §6.2）。读不出就是 null */
   icc: string | null
 }
 

@@ -20,10 +20,23 @@ const ROOT = 'src/main/image'
 /** 每一对都是「写法 → 为什么会改尺寸」 */
 const FORBIDDEN = [
   { pattern: /\.resize\s*\(/, why: '直接改尺寸，违反承诺二' },
-  { pattern: /\.rotate\s*\(/, why: 'orientation 5-8 时真旋转像素，宽高互换（SPEC §14.1）' },
-  { pattern: /\.extract\s*\(/, why: '裁剪会改尺寸' },
-  { pattern: /\.trim\s*\(/, why: '去边会改尺寸' }
+  { pattern: /\.rotate\s*\(/, why: 'orientation 5-8 时真旋转像素，宽高互换（SPEC §14.1）' }
 ]
+
+/*
+ * 为什么没有把 `.trim(` 和 `.extract(` 也加进来。
+ *
+ * 加过，然后被自己的误报打回来了：`String.prototype.trim()` 命中了 `.trim(`。
+ * 而 `.extract(` 同样容易和正则提取、对象取值之类撞上。
+ *
+ * **一条会误报的护栏比没有护栏更糟** —— 人一旦习惯了「这个红是假的」，
+ * 真红的那次也会被忽略。所以宁可窄一点，只留 SPEC 明确点名、且在本项目里
+ * 不会撞名的这两个。
+ *
+ * 裁剪（`.extract()`）这一路另有兜底：`src/main/image/verify.ts` 的
+ * `assertSameDimensions` 会在每次输出后断言宽高与输入一致，不一致就抛错不写文件。
+ * 那个是**量结果**，比查写法更硬。
+ */
 
 function walk(dir) {
   const out = []
