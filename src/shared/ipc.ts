@@ -24,5 +24,3 @@ export const IPC = {
   /** M→R `TaskDoneEvent` */
   taskDone: 'task:done'
 } as const
-
-export type IpcChannel = (typeof IPC)[keyof typeof IPC]
