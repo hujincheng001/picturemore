@@ -108,12 +108,31 @@ try {
   await cdp.send('Runtime.enable')
 
   console.log('\n[packaged] 渲染层与 preload：')
-  const boot = await evaluate(
-    cdp,
-    `({ title: document.title, hasApi: typeof window.pictureMore === 'object', hasRoot: !!document.getElementById('root') })`
-  )
+  /*
+   * 等渲染层**真正挂载**再断言。
+   *
+   * 这里原来是一连上就读 `document.getElementById('root')`，有两个问题：
+   *   1. `waitForPage` 只保证「有一个可调试的页面」，那时 HTML 可能还没解析到 #root
+   *   2. 「元素存在」也不代表 React 渲染完了 —— 空壳一样算存在
+   *
+   * 所以等它有子元素。开发冒烟早就修过同一个竞态（见 docs/decisions.md 的 T20-4），
+   * 但没同步到这里 —— 于是它时灵时不灵，直到这次真的红了。
+   */
+  let boot = { title: '', hasApi: false, hasRoot: false }
+  for (let i = 0; i < 80; i++) {
+    boot = await evaluate(
+      cdp,
+      `({
+        title: document.title,
+        hasApi: typeof window.pictureMore === 'object',
+        hasRoot: (document.getElementById('root')?.childElementCount ?? 0) > 0
+      })`
+    )
+    if (boot.hasApi && boot.hasRoot) break
+    await sleep(150)
+  }
   log(boot.hasApi, `window.pictureMore 已挂载`)
-  log(boot.hasRoot, `#root 已挂载（title="${boot.title}"）`)
+  log(boot.hasRoot, `#root 已渲染出内容（title="${boot.title}"）`)
 
   // ---- 联网拦截：CSP 只在打包后才注入 ----
   // `security.ts` 里的 CSP 是 `if (app.isPackaged)` 才挂的，所以这条只能在打包产物上验。
