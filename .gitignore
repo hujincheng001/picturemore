@@ -4,6 +4,9 @@ node_modules/
 # 测试产物
 .vitest/
 
+# 发布用的 git bundle
+*.bundle
+
 # 构建产物
 out/
 dist/

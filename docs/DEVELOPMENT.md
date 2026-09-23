@@ -234,4 +234,50 @@ CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run smoke
 5. **限制 sharp 并发**（建议 4~8），libvips 内部已有线程池，放开会吃满内存
 6. **打包注意原生模块**：sharp 需要 `asarUnpack` 配置，参考 `imagePro` 的 `build` 字段
 7. **不引入任何需要联网的运行时依赖**——看到「云 API」「在线模型」「CDN 资源」一律先停下来确认
+
+---
+
+## 七、上传到 GitHub
+
+```bash
+# 有 token：脚本自动建仓库并推送（token 勾 repo 权限即可）
+GITHUB_TOKEN=ghp_xxx npm run publish:github
+
+# 没有 token：先自己在 GitHub 上建一个**空仓库**
+#   不要勾 README / .gitignore / license，否则会多出一个初始提交，push 上去要处理冲突
+git remote add origin git@github.com:<用户名>/pictureMore.git
+git push -u origin main
+```
+
+**为什么建仓库要走 API**：push 到远端之前得先在 GitHub 上把仓库建出来，
+而建仓库只能走 REST API，git 协议本身做不到。所以脚本是「API 建 + git 推」。
+
+`git remote add` 那条路需要 SSH 公钥已经加到 GitHub（`cat ~/.ssh/id_rsa.pub` 看本机公钥）。
+
+### 公开前的检查清单
+
+发布前跑一遍，别把不该公开的东西推上去：
+
+```bash
+# 1. 有没有密钥、凭据、.env 被跟踪
+git grep -lniE "api[_-]?key|secret|password|token|BEGIN .* PRIVATE" -- . | head
+#    注意：「token」会命中大量设计 token 的讨论，那是误报，要逐条看
+
+git ls-files | grep -iE "\.env|credential|secret|\.pem|\.key"
+
+# 2. 有没有超大文件（GitHub 单文件硬限 100MB）
+git ls-files -z | xargs -0 ls -la | sort -k5 -rn | head -10
+
+# 3. 仓库总体积（超过 1GB 会被警告）
+du -sh .git
+```
+
+### 打包成一个文件
+
+```bash
+git bundle create picturemore.bundle --all
+```
+
+`bundle` 是**带完整历史的单文件仓库**，`git clone picturemore.bundle xxx` 就能还原，
+适合拷贝或离线传输。它不进版本库（已在 `.gitignore` 里）。
 8. **文件路径全部走用户选择**——用 `dialog.showOpenDialog` / `showSaveDialog`，不硬编码路径、不擅自扫描用户磁盘
