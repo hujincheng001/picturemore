@@ -26,7 +26,8 @@
     "find:orphans": "node scripts/find-orphans.mjs",
     "smoke:packaged:cn": "node scripts/smoke-packaged-cn.mjs",
     "check:package": "node scripts/check-package-content.mjs",
-    "smoke:portable": "node scripts/smoke-portable.mjs"
+    "smoke:portable": "node scripts/smoke-portable.mjs",
+    "publish:github": "node scripts/publish-to-github.mjs"
   },
   "dependencies": {
     "heic-decode": "^2.1.0",
