@@ -21,7 +21,7 @@
 | 顺序 | 文件 | 读它是为了 |
 |---|---|---|
 | 1 | `docs/decisions.md` | **先读这个**。每条实测结论 + 为什么不能按直觉写 |
-| 2 | `README.md` | 技术栈决策依据、Electron 红线、常用命令 |
+| 2 | `docs/DEVELOPMENT.md` | 技术栈决策依据、目录结构、开发环境 |
 | 3 | `PRODUCT.md` | 产品定位、目标用户、能力边界、产品原则 |
 | 4 | `SPEC.md` | **开发依据**。架构、压缩算法、IPC 契约、陷阱、里程碑 |
 | 5 | `docs/superpowers/plans/2026-09-19-picturemore-v1.md` | **任务级实施计划**，14 个 Task（已完成，当执行记录看） |
@@ -144,7 +144,7 @@ npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
 
 1. 先查 `docs/decisions.md`（那里有全部实测结论）
 2. 再查 `SPEC.md` §14 已知陷阱
-3. 再查 `README.md` 的红线清单
+3. 再查 `docs/DEVELOPMENT.md` 的红线清单
 4. 都不覆盖，就问用户，**不要猜**
 
 ---

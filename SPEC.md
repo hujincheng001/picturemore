@@ -14,7 +14,7 @@
 
 | 顺序 | 文件 | 读它是为了 |
 |---|---|---|
-| 1 | `README.md` | 技术栈决策依据、Electron 红线、常用命令 |
+| 1 | `docs/DEVELOPMENT.md` | 技术栈决策依据、目录结构、开发环境 |
 | 2 | `PRODUCT.md` | 产品定位、目标用户、两条承诺、能力边界 |
 | 3 | `SPEC.md`（本文） | 开发依据。架构、算法、IPC 契约、里程碑 |
 | 4 | `DESIGN.md` + `prototype/index.html` | 视觉规格与唯一视觉基准 |
@@ -42,7 +42,7 @@
 
 - 视觉上的任何问题 → 以 `prototype/index.html` 为准，并排打开比对
 - 文案上的任何问题 → 查 §8.4 文案表，不要自己造词
-- 技术选型上的任何问题 → 先查 §14 已知陷阱，再查 `README.md`，最后才问
+- 技术选型上的任何问题 → 先查 §14 已知陷阱，再查 `docs/DEVELOPMENT.md`，最后才问
 - **不要引入新依赖。** 除 `heic-decode` 外，本文档指定的依赖就是全部
 
 ---
@@ -133,14 +133,17 @@ pictureMore/
 ├─ electron-builder.yml
 ├─ tsconfig.json  tsconfig.node.json  tsconfig.web.json
 ├─ vitest.config.ts
-├─ README.md
+├─ README.md               # 面向使用者：这是什么、怎么下载、怎么用
 ├─ PRODUCT.md              # 产品定义（本文件的来源）
 ├─ DESIGN.md               # 视觉规范
 ├─ SPEC.md                 # 本文件
+├─ AGENTS.md               # AI 开发会话入口页
 ├─ prototype/
 │  └─ index.html           # 视觉基准，只读
 ├─ docs/
-│  └─ decisions.md         # 决策记录（每个"为什么"写这里）
+│  ├─ decisions.md         # 决策记录（每个"为什么"写这里）
+│  ├─ DEVELOPMENT.md       # 面向开发者：技术栈依据、目录结构、环境
+│  └─ images/              # 文档配图（README 截图）
 ├─ tests/
 │  ├─ fixtures/            # 测试用图片
 │  └─ e2e/

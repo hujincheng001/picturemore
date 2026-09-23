@@ -9,7 +9,7 @@ web
 ## Stack
 
 Electron 44 + React 19 + Vite 8 + TypeScript 5.9 + Tailwind CSS 4 + sharp 0.35 + zustand 5 + electron-builder 26。
-已由 `README.md` 与 `picturemore-dev` 技能锁定，本轮不重新选择。桌面壳（Electron）负责本地文件访问与图像处理，渲染层是标准 web 技术。
+已由 `docs/DEVELOPMENT.md` 与 `picturemore-dev` 技能锁定，本轮不重新选择。桌面壳（Electron）负责本地文件访问与图像处理，渲染层是标准 web 技术。
 
 ## Users
 
@@ -57,7 +57,7 @@ v1 只做两个入口，共用同一条底层流水线（选图 → 队列 → s
 >
 > 具体含义：绝不降分辨率、绝不裁剪、绝不重绘像素；只允许在编码参数上做感知无损的优化（质量档位保持在肉眼不可辨区间、色度抽样与元数据按需精简）。任何为了凑压缩率而牺牲观感的做法一律视为 bug，不是取舍。
 
-**硬约束**（继承自 `README.md` 与 `picturemore-dev`，优先于一切实现选择）：
+**硬约束**（继承自 `docs/DEVELOPMENT.md` 与 `picturemore-dev`，优先于一切实现选择）：
 
 - 渲染进程不直接访问文件系统，全部走 IPC；`contextIsolation: true` + `nodeIntegration: false` 不可关闭
 - 大图预览一律用缩略图（1000px 内），导出时才处理原图

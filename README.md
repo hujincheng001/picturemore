@@ -1,246 +1,152 @@
-# pictureMore
+# 图压压 pictureMore
 
-本地图片编辑 / 处理工具（PC 桌面端）。
+**把「发不出去的图」压到能发出去。** Windows 桌面应用，全程本地运行。
 
-## 产品定位（决定一切取舍）
+![图压压界面](docs/images/screenshot.png)
 
-**用户下载安装包到本地运行，所有数据不出本机。**
+---
 
-- 图片内容**永不上传**任何服务器——包括"为了效果更好"调云端 AI 接口，没有例外
-- 运行期**零网络依赖**，核心功能断网可用
-- **不采集用户数据**，无遥测、无埋点
-- 前端资源全部打包（不用 CDN），避免断网时界面崩
+## 为什么做这个
 
-> 本文档记录**技术栈决策依据**与**已配置的技能**，供开发时随时查阅。
-> 最近更新：2026-09-19（修正技术栈 + 补充本地化约束）
+场景很具体：微信发不出、邮件附件超限、办事系统要求「照片 ≤ 200KB 且必须 JPG」。
+
+在线压缩工具都能解决这个问题，代价是把图上传到别人的服务器。证件照、合同、私密照片，很多人不愿意。
+
+而这件事其实**不需要联网**。
+
+---
+
+## 两条承诺
+
+### 一、图片内容永不离开你的机器
+
+- 运行时**零网络请求**，断网完全可用
+- 无遥测、无埋点、无广告
+- 前端资源全部打包，**不用 CDN**（避免断网时界面崩）
+- 主进程在运行时也拦截网络请求，不只是「没有调用的地方」
+
+### 二、只改文件大小，不改图片本身
+
+很多压缩工具靠**悄悄降分辨率**兑现压缩率。图在手机上看还行，打印或放大就废了。
+
+本产品承诺**尺寸、构图、像素一律不动**，只做编码层面的优化：
+
+- 绝不缩放、绝不裁剪、绝不旋转像素
+- 每次输出后**断言宽高与输入一致**，不一致就抛错、不写文件
+- 压缩目标达不成时**如实告诉你**，绝不为了达标牺牲观感
+
+---
+
+## 功能
+
+| 功能 | 说明 |
+|---|---|
+| **拖拽即用** | 拖入图片或文件夹（展开一层），自动筛选图片文件 |
+| **指定缩小比例** | 拖滑块设定想缩小多少，20% 到 90% |
+| **输出格式** | 保持原格式 / JPG / PNG / WebP |
+| **实时预估** | 拖动滑块即时显示预计体积，纯前端计算 |
+| **逐行状态** | 每张图单独显示结果，失败原因直接写在那一行 |
+| **绝不覆盖原图** | 默认输出到 `<原图目录>/processed`，同名自动加序号 |
+| **单批上限** | 一次最多 100 张，超出部分如实报出 |
+
+界面只有中文。全站零图标、零 emoji，交互靠文字。
+
+---
+
+## 支持的格式
+
+| | 格式 |
+|---|---|
+| **输入** | HEIC / HEIF、JPG / JPEG、PNG、WebP、AVIF、GIF、TIFF |
+| **输出** | JPG、PNG、WebP |
+
+iPhone 拍的 HEIC 直接拖进来就行，不用先转换。
+
+> **PNG 能压多少，看图的色数，不看输入格式。** 截图、图标、线条图（颜色数 ≤ 256）走调色板量化，能压掉 80% 以上；照片类几十万色，无损格式无能为力，此时会返回原文件并如实标注。
+
+---
+
+## 下载使用
+
+到 [Releases](../../releases) 页下载。两种形态：
+
+| 文件 | 说明 |
+|---|---|
+| `图压压-x.y.z-便携版.exe` | **免安装单文件**，约 114MB。双击就跑，不写注册表，可以拷到 U 盘 |
+| `图压压-x.y.z-setup.exe` | 安装包，约 120MB。建桌面与开始菜单快捷方式，可正常卸载 |
+
+便携版每次启动会先自解压到临时目录，比装好的慢一两秒。
+
+---
+
+## 压缩是怎么做的
+
+核心思路：**完全不碰像素，只在「编码质量」这一个旋钮上做搜索。**
+
+1. 算出目标体积：`原体积 × (1 − 缩小百分比)`
+2. 先试**质量底线**。如果连底线都压不到目标，说明再往上抬质量只会更大，一次编码就能判定结果
+3. 然后在 `[底线, 95]` 上二分搜索，最多试 6 档
+4. 从试过的档里挑「**满足目标且质量最高**」的那一个
+5. 一个都没达标，退回质量底线并如实标记
+6. 结果比原图还大，直接返回原文件
+
+第 2 步不是微优化。实测高熵图（噪声类）的编码次数从 6 次降到 1 次。
+
+质量底线也不是拍脑袋定的：「正常观看看不出差别」是**量化验证过**的。输出解回像素与原图逐点比，均值偏差 < 3/255、p99 ≤ 8。
+
+完整推导、实测数据、以及每一条「为什么不能按直觉写」，见 [`docs/decisions.md`](docs/decisions.md)。
+
+---
+
+## 开发
+
+```bash
+npm install
+npm run dev              # 开发模式
+npm run build            # 类型检查 + 构建 + 打 Windows 安装包
+
+npm run check            # 主护栏：两条 lint + 类型检查 + 全部测试
+npm run smoke            # 端到端：构建 + 启动 + 20 组检查 + 5 张截图
+npm run smoke:packaged   # 打包产物冒烟
+npm run smoke:packaged:cn # 同上，但在中文 + 空格路径下跑
+npm run smoke:portable   # 免安装便携版冒烟
+npm run check:package    # 核查安装包内容有没有混进不该有的东西
+```
+
+技术栈：Electron 44 + React 19 + Vite 8 + TypeScript 5.9 + Tailwind CSS 4 + sharp 0.35 + zustand 5。
+
+**三条不能破的线**（违反任何一条，代码即使跑通也是错的）：
+
+1. 绝不缩放、裁剪、旋转像素
+2. 每次输出后断言宽高与输入一致，不一致就抛错不写文件
+3. 渲染进程不碰文件系统，`contextIsolation: true` 永远不动
+
+这三条都有自动化护栏守着，不靠人记。
 
 ---
 
 ## 文档地图
 
-| 文件 | 内容 | 什么时候读 |
-|---|---|---|
-| **`AGENTS.md`** | **AI 开发会话的入口页**：当前状态、三条不能破的线、怎么验证 | **开工第一份** |
-| **`docs/decisions.md`** | **实测结论与取舍记录**。每条都写着「为什么不能按直觉写」 | **动手前先看，能省掉一半返工** |
-| `PRODUCT.md` | 产品定位、目标用户、能力边界、产品原则 | 想搞清楚"为什么这么做" |
-| `SPEC.md` | 开发依据：架构、压缩算法、IPC 契约、测试计划、已知陷阱、里程碑 | 写代码时随时查 |
-| `DESIGN.md` | 视觉规格：三层 token、组件状态矩阵、动效表、文案规则 | 写界面时逐条对照 |
-| `prototype/index.html` | **唯一视觉基准**，浏览器直接打开 | 写界面时并排比对 |
-| `docs/superpowers/plans/2026-09-19-picturemore-v1.md` | 任务级实施计划，14 个 Task | 已完成，当执行记录看 |
-
-**状态**：v1.0.0 已交付，安装包在 `release/`。`AGENTS.md` 的「已完成的部分」列着全部产出，以及还挂着的待定项。
-
----
-
-## 一、技术栈
-
-### 选定方案
-
-```
-桌面壳     Electron 44
-前端       React 19 + Vite 7 + TypeScript 5.9
-样式       Tailwind CSS 4
-图像处理   sharp 0.35（基于 libvips，主力）
-状态       zustand 5
-打包       electron-builder 26
-```
-
-**两处与最初设想不同，都是实测撞出来的：**
-
-| 项 | 原计划 | 实际 | 原因 |
-|---|---|---|---|
-| Vite | 8 | **7** | `electron-vite@5` 的 peer 是 `vite@^5 \|\| ^6 \|\| ^7`，装 8 会 `ERESOLVE`。`@vitejs/plugin-react` 也跟着从 6 降到 5 |
-| 路由 | react-router-dom 7 | **不用** | 单窗口单页面，`AGENTS.md` 也明确禁止引入 |
-
-**没有用 `@electron-toolkit/*`**：脚手架默认会带，但那会多两个依赖，而它提供的东西（preload 的类型辅助、tsconfig 基类）手写一遍只要几十行。
-
-### 决策依据
-
-**本机已有的可复用资产**：
-
-| 项目路径 | 技术栈 | 参考价值 |
-|---|---|---|
-| `F:\AIGC\解疑助手\imagePro` | Electron 44 + React 19 + Tailwind 4 + **sharp 0.35** + electron-builder | ★ **已做出可打包的图片压缩工具，路径完全验证** |
-| `F:\AIGC\新家助手\admin-web` | Vite 8 + React 19 + TS 5.9 + antd 5 + zustand 5 + axios | 工程配置参考 |
-| `F:\AIGC\我的冰箱\frontend` | Vite 8 + React 19 + TS + react-router 7 + zustand 5 | 精简配置参考 |
-| `F:\AIGC\善解疑\frontend` | Vite 8 + React 19 + TS | 最小配置参考 |
-
-这 4 个项目的 `node_modules` **全部已安装**，搭建新项目时可直接复制 `package.json` 与配置文件再增删，避免重复下载。
-
-**为什么用 sharp 而不是 Python**：
-
-- sharp 基于 libvips，处理速度比 Python PIL 快数倍，且不需要跨语言调用
-- 压缩 / 缩放 / 裁剪 / 旋转 / 格式转换 / 合成 / 水印 / 基础调色 / 卷积滤镜 —— 全部覆盖
-
-**⛔ Python sidecar 方案已否决**（早期曾考虑，对可分发桌面应用是错误方向）：
-
-1. **分发体积爆炸**——要随包塞 Python 运行时（~50MB）+ onnxruntime + 模型（u2net 约 176MB），安装包翻倍
-2. **打包复杂度高**——跨语言进程管理、路径、权限、杀软误报，在用户机器上全是坑
-3. **本机 rembg 实际是空壳**——虽已 pip 安装，但模型从未下载（`~/.u2net` 不存在），本来跑不起来
-4. **有更好的替代**——`onnxruntime-node` 是官方 Node 原生模块，同一 ONNX 模型可直接在 Electron 主进程推理
-
-**结论**：v1 只做 sharp 能覆盖的功能；真要做 AI 抠图，用 `onnxruntime-node` + 随包模型。
-
-### 安装包体积预估（要如实写进产品说明）
-
-| 项 | 体积量级 |
+| 文件 | 内容 |
 |---|---|
-| Electron 运行时 | ~80 MB |
-| sharp（含 libvips 原生库） | ~30 MB |
-| 前端构建产物 | ~2 MB |
-| **基础安装包合计** | **约 120 MB** |
-| 若将来加 AI 模型（u2net） | +176 MB |
-
-### 环境
-
-```
-Node    D:\node\node.exe (v24.14.1)  |  managed v22.22.2
-npm     registry=https://registry.npmjs.org/  cache=D:\npm-cache  prefix=D:\npm-global
-Python  D:\Python\python.exe (3.11.5)  ← 仅 AI sidecar 用
-```
+| [`AGENTS.md`](AGENTS.md) | AI 开发会话的入口页：当前状态、三条红线、怎么验证 |
+| [`docs/decisions.md`](docs/decisions.md) | **实测结论与取舍记录**，每条都写着「为什么不能按直觉写」 |
+| [`SPEC.md`](SPEC.md) | 开发依据：架构、压缩算法、IPC 契约、已知陷阱 |
+| [`DESIGN.md`](DESIGN.md) | 视觉规格：三层 token、组件状态矩阵、动效、文案规则 |
+| [`prototype/index.html`](prototype/index.html) | 唯一视觉基准，浏览器直接打开 |
+| [`PRODUCT.md`](PRODUCT.md) | 产品定位、目标用户、能力边界 |
+| [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | 技术栈决策依据、目录结构、开发环境 |
 
 ---
 
-## 二、已配置的技能（34 个）
+## 许可
 
-技能放在 `.workbuddy\skills\`，程序会**自动加载**。
-
-### 项目专属（1）
-
-| 技能 | 作用 |
-|---|---|
-| `picturemore-dev` | **本项目开发规范**——技术栈、sharp 能力边界、参考项目路径、Electron 红线、常用命令 |
-
-### 设计（10）
-
-| 技能 | 作用 |
-|---|---|
-| `impeccable` | 设计总纲，26 个命令 + 44 篇 reference + 脚本化质检钩子 |
-| `ui-ux-pro-max` | 选型知识库：50+ 风格、161 调色板、57 字体配对、99 UX 准则 |
-| `taste-skill` | 反「AI 感」前端（`impeccable` 的零依赖备选） |
-| `minimalist-skill` | 极简编辑风——工具类界面最合适的默认风格 |
-| `design-system` | 三层设计令牌架构（primitive → semantic → component） |
-| `ui-styling` | **shadcn/ui + Tailwind 组件模板（97 个附带文件）**——本项目主用 |
-| `imagegen-frontend-web` | 生成界面设计稿参考图 |
-| `image-to-code-skill` | 设计稿 → 代码闭环 |
-| `redesign-skill` | 界面做出来后的品质升级 |
-| `output-skill` | 禁止代码截断与占位符 |
-
-### 工程（15）
-
-`using-superpowers`（总入口）· `brainstorming` · `writing-plans` · `executing-plans` ·
-`test-driven-development` · `systematic-debugging` · `requesting-code-review` · `receiving-code-review` ·
-`verification-before-completion` · `subagent-driven-development` · `dispatching-parallel-agents` ·
-`using-git-worktrees` · `finishing-a-development-branch` · `writing-skills` · `karpathy-guidelines`
-
-覆盖「想清楚 → 写计划 → 写测试 → 实现 → 调试 → 评审 → 验证 → 合并」全流程。
-
-### 产品与质量（8）
-
-`prd-development`（写 PRD）· `user-story` / `user-story-mapping`（需求表达）·
-`product-strategy-session`（产品战略）· `prioritization-advisor` / `analyze-feature-requests`（排优先级）·
-`pre-mortem`（上线前风险排查）· `test-scenarios`（测试场景）
+尚未指定许可证。在明确之前，保留所有权利。
 
 ---
 
-## 三、技能如何生效
+## 关于这份代码
 
-项目级技能的加载路径是 `<项目目录>\.workbuddy\skills\`。**用 `D:\pictureMore` 作为工作目录打开 WorkBuddy**，这 34 个技能就会自动出现在可用列表中。
+这个项目是**用 AI 辅助开发完成**的，所以代码库里留下了大量「为什么这么做」的记录 —— 尤其是那些**实测推翻了直觉**的地方。`docs/decisions.md` 有一百多条这样的条目，从「sharp 的预编译版解不了 HEIC 的像素」到「一条永远不命中的检查规则比没有检查更危险」。
 
-已额外创建路径兼容联接：
-
-```
-D:\pictureMore\.workbuddy-ai  →  D:\pictureMore\.workbuddy
-```
-
-这样两种路径解析方式（硬编码 `.workbuddy` 与产品数据目录名 `.workbuddy-ai`）都能命中同一份技能。
-
----
-
-## 四、目录结构
-
-```
-pictureMore/
-├── src/
-│   ├── main/                      # Electron 主进程（独占文件系统与 sharp）
-│   │   ├── index.ts               # 入口：单实例锁 → 注册 IPC → 安全策略 → 开窗口
-│   │   ├── window.ts              # BrowserWindow（两条红线在这里）
-│   │   ├── security.ts            # 运行时零联网：onBeforeRequest + 打包后注入 CSP
-│   │   ├── queue.ts               # 有界并发池 clamp(cpus-1, 4, 8)
-│   │   ├── settings.ts            # 手写 JSON 设置存储（不用 electron-store）
-│   │   ├── ipc/                   # IPC handler：files / dialog / settings / task
-│   │   └── image/                 # ★ 图像引擎（纯函数，不依赖 Electron API）
-│   │       ├── probe.ts           # 读容器，拿格式/宽高/alpha/orientation
-│   │       ├── plan.ts            # 质量档推导：targetBytes / qualityFloor / 二分
-│   │       ├── encode.ts          # 唯一的 sharp 输出出口（metadata 配方在这）
-│   │       ├── compress.ts        # 单张主流程，尺寸断言在这
-│   │       ├── heic.ts            # HEIC 兜底解码（sharp 解不了 HEVC）
-│   │       ├── naming.ts          # 输出路径与防覆盖
-│   │       ├── verify.ts          # assertSameDimensions
-│   │       └── runtime.ts         # sharp.cache(false)
-│   ├── preload/                   # contextBridge 白名单，只做转发
-│   ├── renderer/                  # React 前端
-│   │   ├── components/            # 12 个组件，与原型元素一一对应
-│   │   ├── lib/                   # copy（文案集中）/ format / note（四态文案）/ reason
-│   │   ├── store/                 # zustand
-│   │   └── styles/                # tokens.css（三层 token）+ index.css
-│   └── shared/                    # 跨进程契约：types / ipc 通道名 / reasons / api
-├── scripts/                       # 验证与冒烟（不进包）
-├── tests/fixtures/                # 测试图片（合成的不入库，真实 HEIC 入库）
-├── prototype/index.html           # 唯一视觉基准
-├── build/                         # 打包资源（图标）
-└── electron-builder.yml           # 打包配置
-```
-
-> 不设 `python/` 目录——AI 能力如要做，走 `onnxruntime-node` 在主进程内推理，不引入跨语言进程。
-
-**核心原则**：`src/main/image/` 必须是纯函数模块，不依赖 Electron API——便于单测，也便于将来替换实现。
-它下面有 7 个 `.spec.ts`，共 100 多条测试，`npm test` 就能跑，不需要起 Electron。
-
----
-
-## 五、常用命令
-
-```bash
-npm install              # 装依赖
-
-npm run dev              # 开发（Vite + Electron）
-npm run build            # 类型检查 + 构建 + 打 Windows 安装包
-npm run build:dir        # 只构建不打安装包
-
-npm run check            # 主护栏：lint:no-resize + typecheck + 全部测试（约 5 分钟）
-npm test                 # 只跑测试
-npm run test:watch       # 测试 watch 模式
-npm run lint:no-resize   # 单独跑「绝不 resize」的拦截
-
-npm run smoke            # 端到端冒烟：构建 + 启动 + 18 组检查 + 5 张截图
-npm run smoke:packaged   # 打包产物冒烟（先跑 npm run build）
-
-npm run fixtures         # 重新生成合成测试图（8 张，约 54MB，不入库）
-npm run verify:icc       # 单独验证 withIccProfile 会不会改像素
-```
-
-### 本机环境的三个坑
-
-这三条每次开发都会撞，`AGENTS.md` 里有详细说明：
-
-```bash
-# 1 + 2：构建/冒烟前加上这个，否则 Vite 清空 out/ 会被宿主的安全删除护栏拦住
-CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run smoke
-
-# 3：启动 Electron 的脚本必须自己剥掉这两个变量，否则 electron.exe 会退化成 Node
-#    （脚本里已经处理了，这里是给手写命令的人看的）
-```
-
----
-
-## 六、开发红线（Electron 特有）
-
-1. **渲染进程不直接访问文件系统**，全部走 IPC → 主进程；`contextIsolation: true` 不能关
-2. **大图不发原图给渲染进程**，预览用缩略图（限制 1000px 内），导出时才处理原图
-3. **耗时处理异步 + 进度反馈**，走主进程队列 + IPC 推送，不阻塞 UI
-4. **绝不原地覆盖原图**，一律输出到用户指定目录，文件名保持原样
-5. **限制 sharp 并发**（建议 4~8），libvips 内部已有线程池，放开会吃满内存
-6. **打包注意原生模块**：sharp 需要 `asarUnpack` 配置，参考 `imagePro` 的 `build` 字段
-7. **不引入任何需要联网的运行时依赖**——看到「云 API」「在线模型」「CDN 资源」一律先停下来确认
-8. **文件路径全部走用户选择**——用 `dialog.showOpenDialog` / `showSaveDialog`，不硬编码路径、不擅自扫描用户磁盘
+如果你要接手这份代码，建议先读 `docs/decisions.md`，能省掉一半返工。
