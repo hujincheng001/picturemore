@@ -50,5 +50,13 @@
     "vite": "^7.3.6",
     "vitest": "^5.0.1"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hujincheng001/picturemore.git"
+  },
+  "homepage": "https://github.com/hujincheng001/picturemore#readme",
+  "bugs": {
+    "url": "https://github.com/hujincheng001/picturemore/issues"
+  }
 }
