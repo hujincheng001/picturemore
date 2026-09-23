@@ -1,7 +1,7 @@
 {
   "name": "picturemore",
   "version": "1.0.8",
-  "description": "本地图片压缩工具，图片内容永不离开你的电脑",
+  "description": "把「发不出去的图」压到能发出去。Windows 桌面图片压缩工具，完全本地运行。",
   "main": "./out/main/index.js",
   "author": "pictureMore",
   "private": true,
@@ -49,5 +49,6 @@
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
     "vitest": "^5.0.1"
-  }
+  },
+  "license": "MIT"
 }
